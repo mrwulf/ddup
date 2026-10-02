@@ -215,7 +215,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		allDown := len(newHealthyIPs) == 0
 		if allDown && !dc.swapAllDown(true) {
 			event.Type = notify.EventAllUnhealthy
-			hc.notifier.Notify(event)
+			hc.notifier.Notify(ctx, event)
 		} else if !allDown {
 			dc.swapAllDown(false)
 		}
@@ -234,7 +234,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 					if dc.swapNotifiedError(err.Error()) != err.Error() {
 						event.Type = notify.EventDNSUpdateFailed
 						event.Error = err.Error()
-						hc.notifier.Notify(event)
+						hc.notifier.Notify(ctx, event)
 					}
 
 					// Continue, so we don't update the cached previous IPs
@@ -246,7 +246,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 					domainLog.InfoContext(ctx, "Updated DNS records", "targets", event.Published, "priority", newPub.priority, "previous", res.Previous)
 					event.Type = notify.EventDNSUpdated
 					event.Previous = res.Previous
-					hc.notifier.Notify(event)
+					hc.notifier.Notify(ctx, event)
 				} else {
 					// For example on startup, when DNS already reflects the healthy endpoints
 					domainLog.InfoContext(ctx, "DNS records already up to date", "targets", event.Published, "priority", newPub.priority)

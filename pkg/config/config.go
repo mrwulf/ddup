@@ -440,7 +440,7 @@ func normalizeHostname(name string) (string, error) {
 
 // WebhookTemplateFuncs are the functions available in webhook body and header templates
 var WebhookTemplateFuncs = template.FuncMap{
-	"join": func(items []string, sep string) string { return strings.Join(items, sep) },
+	"join": strings.Join,
 	"json": func(v any) (string, error) {
 		b, err := json.Marshal(v)
 		return string(b), err

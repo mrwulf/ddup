@@ -124,21 +124,19 @@ func (c *CloudflareProvider) UpdateRecords(ctx context.Context, domain string, t
 			// A CNAME can't coexist with other records, so when converting to one we first delete the other records
 			// The record that is converted keeps serving until the last moment
 			if missing[0].recordType == recordTypeCNAME {
-				for i := len(remaining) - 1; i >= 0; i-- {
+				for i, other := range remaining {
 					if i == convertIdx {
 						continue
 					}
-					slog.DebugContext(ctx, "Deleting record", "type", remaining[i].Type, "value", remaining[i].Content, "recordID", remaining[i].ID)
-					err = c.deleteRecord(ctx, remaining[i].ID)
+					slog.DebugContext(ctx, "Deleting record", "type", other.Type, "value", other.Content, "recordID", other.ID)
+					err = c.deleteRecord(ctx, other.ID)
 					if err != nil {
-						return UpdateResult{}, fmt.Errorf("error deleting record %s for %s: %w", remaining[i].ID, remaining[i].Content, err)
+						return UpdateResult{}, fmt.Errorf("error deleting record %s for %s: %w", other.ID, other.Content, err)
 					}
 					result.Changed = true
-					remaining = slices.Delete(remaining, i, i+1)
-					if i < convertIdx {
-						convertIdx--
-					}
 				}
+				remaining = []CloudflareRecord{remaining[convertIdx]}
+				convertIdx = 0
 			}
 
 			rec := remaining[convertIdx]

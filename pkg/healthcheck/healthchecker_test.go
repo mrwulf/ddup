@@ -668,7 +668,7 @@ func TestHealthChecker_PriorityTiers(t *testing.T) {
 		hc.checkAndUpdateDNS(t.Context())
 	}
 	published := func() []string {
-		var v []string
+		v := make([]string, 0, len(mockProvider.LastTargets))
 		for _, tg := range mockProvider.LastTargets {
 			v = append(v, tg.Value)
 		}
@@ -727,7 +727,7 @@ func TestHealthChecker_TierChangeEvent(t *testing.T) {
 		events <- ev
 	}))
 	defer srv.Close()
-	n, err := notify.New(t.Context(), []config.ConfigWebhook{{Name: "t", URL: config.SecretString(srv.URL), Method: "POST", Attempts: 1, Timeout: time.Second}})
+	n, err := notify.New([]config.ConfigWebhook{{Name: "t", URL: config.SecretString(srv.URL), Method: "POST", Attempts: 1, Timeout: time.Second}})
 	require.NoError(t, err)
 
 	us := &config.ConfigEndpoint{Name: "us", IP: "1.1.1.1"}

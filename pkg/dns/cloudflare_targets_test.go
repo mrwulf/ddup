@@ -6,14 +6,27 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+type cfRecordFixture struct {
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	TTL     int    `json:"ttl"`
+	Proxied bool   `json:"proxied"`
+}
+
 func cfRecordJSON(id, recordType, content string, proxied bool) string {
-	b, _ := json.Marshal(map[string]any{"id": id, "type": recordType, "name": "app.example.com", "content": content, "ttl": 60, "proxied": proxied})
+	b, err := json.Marshal(cfRecordFixture{ID: id, Type: recordType, Name: "app.example.com", Content: content, TTL: 60, Proxied: proxied})
+	if err != nil {
+		panic(err)
+	}
 	return string(b)
 }
 
@@ -52,21 +65,11 @@ func cfWrites(t *testing.T, mockTransport *MockHTTPTransport) []cfWrite {
 	return res
 }
 
-func cfSetExisting(mockTransport *MockHTTPTransport, a, aaaa, cname []string) {
-	setCloudflareRecordsResponse(mockTransport, "app.example.com", "A", joinJSON(a))
-	setCloudflareRecordsResponse(mockTransport, "app.example.com", "AAAA", joinJSON(aaaa))
-	setCloudflareRecordsResponse(mockTransport, "app.example.com", "CNAME", joinJSON(cname))
-}
-
-func joinJSON(items []string) string {
-	var out string
-	for i, it := range items {
-		if i > 0 {
-			out += ","
-		}
-		out += it
-	}
-	return out
+// cfSetExisting mocks the existing A and CNAME records of the domain (there are never AAAA records in these tests)
+func cfSetExisting(mockTransport *MockHTTPTransport, a, cname []string) {
+	setCloudflareRecordsResponse(mockTransport, "app.example.com", "A", strings.Join(a, ","))
+	setCloudflareRecordsResponse(mockTransport, "app.example.com", "AAAA", "")
+	setCloudflareRecordsResponse(mockTransport, "app.example.com", "CNAME", strings.Join(cname, ","))
 }
 
 func TestCloudflareProvider_Targets(t *testing.T) {
@@ -75,7 +78,7 @@ func TestCloudflareProvider_Targets(t *testing.T) {
 
 	t.Run("create proxied CNAME", func(t *testing.T) {
 		provider, mt := newCloudflareTestProviderWithMock()
-		cfSetExisting(mt, nil, nil, nil)
+		cfSetExisting(mt, nil, nil)
 		cfOK(mt, http.MethodPost, dnsPath)
 
 		res, err := provider.UpdateRecords(t.Context(), "app.example.com", 60, []Target{cname})
@@ -92,7 +95,7 @@ func TestCloudflareProvider_Targets(t *testing.T) {
 
 	t.Run("unchanged CNAME writes nothing", func(t *testing.T) {
 		provider, mt := newCloudflareTestProviderWithMock()
-		cfSetExisting(mt, nil, nil, []string{cfRecordJSON("c1", "CNAME", "tunnel.example.com", true)})
+		cfSetExisting(mt, nil, []string{cfRecordJSON("c1", "CNAME", "tunnel.example.com", true)})
 
 		res, err := provider.UpdateRecords(t.Context(), "app.example.com", 60, []Target{cname})
 		require.NoError(t, err)
@@ -103,7 +106,7 @@ func TestCloudflareProvider_Targets(t *testing.T) {
 
 	t.Run("A records to CNAME converts one record in place after deleting the others", func(t *testing.T) {
 		provider, mt := newCloudflareTestProviderWithMock()
-		cfSetExisting(mt, []string{cfRecordJSON("a1", "A", "1.1.1.1", false), cfRecordJSON("a2", "A", "2.2.2.2", false)}, nil, nil)
+		cfSetExisting(mt, []string{cfRecordJSON("a1", "A", "1.1.1.1", false), cfRecordJSON("a2", "A", "2.2.2.2", false)}, nil)
 		cfOK(mt, http.MethodDelete, dnsPath+"/a2")
 		cfOK(mt, http.MethodPut, dnsPath+"/a1")
 
@@ -124,7 +127,7 @@ func TestCloudflareProvider_Targets(t *testing.T) {
 
 	t.Run("CNAME to A records converts the CNAME in place then creates the rest", func(t *testing.T) {
 		provider, mt := newCloudflareTestProviderWithMock()
-		cfSetExisting(mt, nil, nil, []string{cfRecordJSON("c1", "CNAME", "tunnel.example.com", true)})
+		cfSetExisting(mt, nil, []string{cfRecordJSON("c1", "CNAME", "tunnel.example.com", true)})
 		cfOK(mt, http.MethodPut, dnsPath+"/c1")
 		cfOK(mt, http.MethodPost, dnsPath)
 
@@ -146,7 +149,7 @@ func TestCloudflareProvider_Targets(t *testing.T) {
 
 	t.Run("changing the CNAME target overwrites the record", func(t *testing.T) {
 		provider, mt := newCloudflareTestProviderWithMock()
-		cfSetExisting(mt, nil, nil, []string{cfRecordJSON("c1", "CNAME", "old.example.com", false)})
+		cfSetExisting(mt, nil, []string{cfRecordJSON("c1", "CNAME", "old.example.com", false)})
 		cfOK(mt, http.MethodPut, dnsPath+"/c1")
 
 		res, err := provider.UpdateRecords(t.Context(), "app.example.com", 60, []Target{{Value: "new.example.com"}})
@@ -160,7 +163,7 @@ func TestCloudflareProvider_Targets(t *testing.T) {
 
 	t.Run("changing proxied status updates the record in place", func(t *testing.T) {
 		provider, mt := newCloudflareTestProviderWithMock()
-		cfSetExisting(mt, []string{cfRecordJSON("a1", "A", "1.1.1.1", false)}, nil, nil)
+		cfSetExisting(mt, []string{cfRecordJSON("a1", "A", "1.1.1.1", false)}, nil)
 		cfOK(mt, http.MethodPut, dnsPath+"/a1")
 
 		res, err := provider.UpdateRecords(t.Context(), "app.example.com", 60, []Target{{Value: "1.1.1.1", Proxied: true}})
@@ -174,7 +177,7 @@ func TestCloudflareProvider_Targets(t *testing.T) {
 
 	t.Run("falls back to delete and create if the record can't be overwritten", func(t *testing.T) {
 		provider, mt := newCloudflareTestProviderWithMock()
-		cfSetExisting(mt, nil, nil, []string{cfRecordJSON("c1", "CNAME", "tunnel.example.com", true)})
+		cfSetExisting(mt, nil, []string{cfRecordJSON("c1", "CNAME", "tunnel.example.com", true)})
 		mt.SetResponse(http.MethodPut, dnsPath+"/c1", &MockResponse{StatusCode: http.StatusBadRequest, Body: `{"success":false}`})
 		cfOK(mt, http.MethodDelete, dnsPath+"/c1")
 		cfOK(mt, http.MethodPost, dnsPath)

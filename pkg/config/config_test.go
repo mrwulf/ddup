@@ -139,3 +139,70 @@ webhooks:
 		require.Error(t, dec.Decode(&c), bad)
 	}
 }
+
+func TestValidateEndpoints_TiersAndTargets(t *testing.T) {
+	cloudflare := ConfigProvider{Cloudflare: &CloudflareConfig{}}
+	ovh := ConfigProvider{OVH: &OVHConfig{}}
+
+	tests := []struct {
+		name      string
+		provider  ConfigProvider
+		endpoints []*ConfigEndpoint
+		errSubstr string
+	}{
+		{name: "ips with priorities", provider: cloudflare, endpoints: []*ConfigEndpoint{
+			{URL: "https://a", IP: "1.1.1.1"}, {URL: "https://b", IP: "2.2.2.2"}, {URL: "https://c", IP: "3.3.3.3", Priority: 1},
+		}},
+		{name: "cname in its own priority", provider: cloudflare, endpoints: []*ConfigEndpoint{
+			{URL: "https://a", IP: "1.1.1.1"}, {URL: "https://c", CNAME: "tunnel.example.com", Proxied: true, Priority: 1},
+		}},
+		{name: "ip and cname", provider: cloudflare, endpoints: []*ConfigEndpoint{{URL: "https://a", IP: "1.1.1.1", CNAME: "a.example.com"}}, errSubstr: "mutually exclusive"},
+		{name: "neither ip nor cname", provider: cloudflare, endpoints: []*ConfigEndpoint{{URL: "https://a"}}, errSubstr: "one of ip and cname is required"},
+		{name: "cname with other endpoints in the same priority", provider: cloudflare, endpoints: []*ConfigEndpoint{
+			{URL: "https://a", IP: "1.1.1.1"}, {URL: "https://c", CNAME: "tunnel.example.com"},
+		}, errSubstr: "can't coexist"},
+		{name: "two cnames in the same priority", provider: cloudflare, endpoints: []*ConfigEndpoint{
+			{URL: "https://a", CNAME: "a.example.com"}, {URL: "https://c", CNAME: "b.example.com"},
+		}, errSubstr: "can't coexist"},
+		{name: "mixed proxied in a priority", provider: cloudflare, endpoints: []*ConfigEndpoint{
+			{URL: "https://a", IP: "1.1.1.1", Proxied: true}, {URL: "https://b", IP: "2.2.2.2"},
+		}, errSubstr: "same value for proxied"},
+		{name: "duplicate target", provider: cloudflare, endpoints: []*ConfigEndpoint{
+			{URL: "https://a", IP: "1.1.1.1"}, {URL: "https://b", IP: "1.1.1.1", Priority: 1},
+		}, errSubstr: "more than one endpoint"},
+		{name: "negative priority", provider: cloudflare, endpoints: []*ConfigEndpoint{{URL: "https://a", IP: "1.1.1.1", Priority: -1}}, errSubstr: "must not be negative"},
+		{name: "cname is an ip", provider: cloudflare, endpoints: []*ConfigEndpoint{{URL: "https://a", CNAME: "1.1.1.1"}}, errSubstr: "IP address"},
+		{name: "invalid cname", provider: cloudflare, endpoints: []*ConfigEndpoint{{URL: "https://a", CNAME: "not a host"}}, errSubstr: "not a valid hostname"},
+		{name: "cname needs cloudflare", provider: ovh, endpoints: []*ConfigEndpoint{{URL: "https://a", CNAME: "a.example.com"}}, errSubstr: "only supported by the Cloudflare provider"},
+		{name: "proxied needs cloudflare", provider: ovh, endpoints: []*ConfigEndpoint{{URL: "https://a", IP: "1.1.1.1", Proxied: true}}, errSubstr: "only supported by the Cloudflare provider"},
+		{name: "priorities work with any provider", provider: ovh, endpoints: []*ConfigEndpoint{
+			{URL: "https://a", IP: "1.1.1.1"}, {URL: "https://b", IP: "2.2.2.2", Priority: 1},
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{
+				Providers: map[string]ConfigProvider{"p": tc.provider},
+				Domains:   []ConfigDomain{{RecordName: "app.example.com", Provider: "p", Endpoints: tc.endpoints}},
+			}
+			err := cfg.Validate(slog.Default())
+			if tc.errSubstr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errSubstr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+
+	t.Run("cname is normalized", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ConfigProvider{"p": cloudflare},
+			Domains:   []ConfigDomain{{RecordName: "app.example.com", Provider: "p", Endpoints: []*ConfigEndpoint{{URL: "https://a", CNAME: "Tunnel.Example.COM."}}}},
+		}
+		require.NoError(t, cfg.Validate(slog.Default()))
+		assert.Equal(t, "tunnel.example.com", cfg.Domains[0].Endpoints[0].CNAME)
+		assert.Equal(t, "tunnel.example.com", cfg.Domains[0].Endpoints[0].Target())
+	})
+}

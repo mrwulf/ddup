@@ -40,13 +40,13 @@ func TestCloudflareProviderIPv6(t *testing.T) {
 		},
 	)
 
-	_, err := provider.UpdateRecords(t.Context(), "ipv6.example.com", 60, []string{"2001:db8::10"})
+	_, err := provider.UpdateRecords(t.Context(), "ipv6.example.com", 60, IPTargets("2001:db8::10"))
 	require.NoError(t, err)
 
 	requests := mockTransport.GetRequests()
-	require.Len(t, requests, 3)
+	require.Len(t, requests, 4)
 
-	body, err := io.ReadAll(requests[2].Body)
+	body, err := io.ReadAll(requests[3].Body)
 	require.NoError(t, err)
 
 	var req map[string]any
@@ -96,7 +96,7 @@ func TestOVHProviderIPv6(t *testing.T) {
 		},
 	)
 
-	_, err := provider.UpdateRecords(t.Context(), "ipv6.example.com", 60, []string{"2001:db8::20"})
+	_, err := provider.UpdateRecords(t.Context(), "ipv6.example.com", 60, IPTargets("2001:db8::20"))
 	require.NoError(t, err)
 
 	requests := mockTransport.GetRequests()
@@ -134,7 +134,7 @@ func TestAzureProviderIPv6(t *testing.T) {
 		&MockResponse{StatusCode: 200, Body: `{}`},
 	)
 
-	_, err := provider.UpdateRecords(t.Context(), "ipv6.example.com", 60, []string{"2001:db8::30"})
+	_, err := provider.UpdateRecords(t.Context(), "ipv6.example.com", 60, IPTargets("2001:db8::30"))
 	require.NoError(t, err)
 
 	requests := mockTransport.GetRequests()
@@ -178,9 +178,9 @@ func TestProvidersCanonicalizeIPv6BeforeComparison(t *testing.T) {
 			},
 		)
 
-		_, err := provider.UpdateRecords(t.Context(), domain, 60, []string{expandedIP})
+		_, err := provider.UpdateRecords(t.Context(), domain, 60, IPTargets(expandedIP))
 		require.NoError(t, err)
-		assert.Len(t, mockTransport.GetRequests(), 2)
+		assert.Len(t, mockTransport.GetRequests(), 3)
 	})
 
 	t.Run("OVH", func(t *testing.T) {
@@ -206,7 +206,7 @@ func TestProvidersCanonicalizeIPv6BeforeComparison(t *testing.T) {
 			},
 		)
 
-		_, err := provider.UpdateRecords(t.Context(), domain, 60, []string{expandedIP})
+		_, err := provider.UpdateRecords(t.Context(), domain, 60, IPTargets(expandedIP))
 		require.NoError(t, err)
 		assert.Len(t, mockTransport.GetRequests(), 3)
 	})
@@ -228,7 +228,7 @@ func TestProvidersCanonicalizeIPv6BeforeComparison(t *testing.T) {
 			},
 		)
 
-		_, err := provider.UpdateRecords(t.Context(), domain, 60, []string{expandedIP})
+		_, err := provider.UpdateRecords(t.Context(), domain, 60, IPTargets(expandedIP))
 		require.NoError(t, err)
 		assert.Len(t, mockTransport.GetRequests(), 2)
 	})
@@ -249,20 +249,20 @@ func TestProvidersCreateBeforeDelete(t *testing.T) {
 					`"content":"192.0.2.1","ttl":60}]}`,
 			},
 		)
-		setCloudflareEmptyAAAAResponse(mockTransport, domain)
+		setCloudflareEmptyAAAAAndCNAMEResponses(mockTransport, domain)
 		mockTransport.SetResponse(
 			http.MethodPost,
 			"/client/v4/zones/test-zone-id/dns_records",
 			&MockResponse{StatusCode: http.StatusInternalServerError, Body: `{}`},
 		)
 
-		_, err := provider.UpdateRecords(t.Context(), domain, 60, []string{"2001:db8::1"})
+		_, err := provider.UpdateRecords(t.Context(), domain, 60, IPTargets("2001:db8::1"))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "error creating record")
 
 		requests := mockTransport.GetRequests()
-		require.Len(t, requests, 3)
-		assert.Equal(t, http.MethodPost, requests[2].Method)
+		require.Len(t, requests, 4)
+		assert.Equal(t, http.MethodPost, requests[3].Method)
 	})
 
 	t.Run("OVH", func(t *testing.T) {
@@ -288,7 +288,7 @@ func TestProvidersCreateBeforeDelete(t *testing.T) {
 			&MockResponse{StatusCode: http.StatusInternalServerError, Body: `{}`},
 		)
 
-		_, err := provider.UpdateRecords(t.Context(), domain, 60, []string{"2001:db8::1"})
+		_, err := provider.UpdateRecords(t.Context(), domain, 60, IPTargets("2001:db8::1"))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "error creating record")
 
@@ -320,7 +320,7 @@ func TestProvidersCreateBeforeDelete(t *testing.T) {
 			&MockResponse{StatusCode: http.StatusInternalServerError, Body: `{}`},
 		)
 
-		_, err := provider.UpdateRecords(t.Context(), domain, 60, []string{"2001:db8::1"})
+		_, err := provider.UpdateRecords(t.Context(), domain, 60, IPTargets("2001:db8::1"))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "creating/updating AAAA record")
 

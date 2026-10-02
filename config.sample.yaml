@@ -39,6 +39,30 @@ domains:
         url: "http://192.168.1.201:9000/health"
         ip: "192.168.1.201"
 
+  # Failover tiers: only the healthy endpoints with the lowest "priority" are published (default 0), and ddup falls back to the next
+  # priority when none are healthy. Endpoints with the same priority are all published (round-robin).
+  # An endpoint publishes either an "ip" (A/AAAA record) or a "cname" (CNAME record, which must be alone in its priority).
+  # "proxied" and "cname" are supported by the Cloudflare provider only; all endpoints with the same priority must use the same "proxied"
+  - recordName: "failover.example.com"
+    provider: "example-provider-1"
+    ttl: 60
+    healthChecks:
+      timeout: "5s"
+      attempts: 3
+      recoverAfter: 3
+    endpoints:
+      - name: "vps-us"
+        url: "https://vps-us.example.com/health"
+        ip: "192.0.2.10"
+      - name: "vps-eu"
+        url: "https://vps-eu.example.com/health"
+        ip: "192.0.2.20"
+      - name: "tunnel"
+        url: "https://tunnel-health.example.com/health"
+        cname: "tunnel.example.com"
+        proxied: true
+        priority: 1
+
 # Provider Configuration
 # Any provider setting, plus webhook "url" and header values, can read secrets from the environment or a file instead of the config file:
 #   apiToken: !env CLOUDFLARE_API_TOKEN

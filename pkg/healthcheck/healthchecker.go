@@ -216,6 +216,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 
 		event := notify.Event{
 			Domain:       domainName,
+			Status:       notify.StatusFor(endpointStates, ""),
 			Healthy:      newHealthyIPs,
 			Published:    newPub.values(),
 			Tier:         newPub.priority,
@@ -247,6 +248,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 					if dc.swapNotifiedError(err.Error()) != err.Error() {
 						event.Type = notify.EventDNSUpdateFailed
 						event.Error = err.Error()
+						event.Status = notify.StatusUnhealthy
 						hc.notifier.Notify(ctx, event)
 					}
 

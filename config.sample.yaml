@@ -92,13 +92,17 @@ providers:
 # Webhooks called on events: dns_updated, dns_update_failed, all_unhealthy (default: all)
 # Failed deliveries are retried with exponential backoff
 # Without "body", the event is sent as JSON. Otherwise body and header values are Go templates
-# with fields .Type .Domain .Time .Healthy .Previous .Endpoints .Error, methods .Subject and .Text, and funcs join and json
+# with fields .Type .Domain .Time .Status .Healthy .Previous .Endpoints .Error, methods .Subject, .Text, .StatusTag (a ntfy tag) and .StatusEmoji, and funcs join and json
 webhooks:
   - name: "ntfy"
     url: "https://ntfy.example.com/ddup"
     events: ["dns_updated", "all_unhealthy"]
     headers:
       Title: "ddup: {{ .Subject }}"
+      # A green, yellow or red circle for the health of the domain (healthy, warning or unhealthy), shown before the title
+      Tags: "{{ .StatusTag }}"
+      # Urgent when nothing is healthy
+      Priority: '{{ if eq .Status "unhealthy" }}high{{ else }}default{{ end }}'
     body: "Healthy: {{ join .Healthy \", \" }}"
     attempts: 5
     timeout: "10s"

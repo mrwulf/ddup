@@ -26,11 +26,43 @@ const (
 	EventAllUnhealthy    = "all_unhealthy"
 )
 
+// Health of a domain, as shown in the dashboard
+const (
+	StatusHealthy   = "healthy"
+	StatusWarning   = "warning"
+	StatusUnhealthy = "unhealthy"
+)
+
+// StatusFor returns the health of a domain from the latest check of its endpoints: healthy if they all are, warning if some are, and unhealthy if none are
+// A domain with an error is unhealthy
+func StatusFor(endpoints []EndpointState, errMsg string) string {
+	if errMsg != "" || len(endpoints) == 0 {
+		return StatusUnhealthy
+	}
+
+	var healthy int
+	for _, ep := range endpoints {
+		if ep.Healthy {
+			healthy++
+		}
+	}
+	switch healthy {
+	case len(endpoints):
+		return StatusHealthy
+	case 0:
+		return StatusUnhealthy
+	default:
+		return StatusWarning
+	}
+}
+
 // Event is sent to webhooks, and is the data available to body and header templates
 type Event struct {
 	Type   string    `json:"event"`
 	Domain string    `json:"domain"`
 	Time   time.Time `json:"time"`
+	// Health of the domain: healthy, warning (some endpoints are unhealthy) or unhealthy
+	Status string `json:"status"`
 	// All healthy targets (IP addresses or CNAME hostnames)
 	Healthy []string `json:"healthy"`
 	// The healthy targets that are published in DNS: those with the lowest priority value
@@ -72,6 +104,7 @@ func (e Event) Subject() string {
 
 var sampleEvent = Event{
 	Type:      EventDNSUpdated,
+	Status:    StatusHealthy,
 	Domain:    "example.com",
 	Time:      time.Now().UTC(),
 	Healthy:   []string{"192.0.2.1"},
@@ -83,6 +116,30 @@ type hook struct {
 	cfg     config.ConfigWebhook
 	body    *template.Template
 	headers map[string]*template.Template
+}
+
+// StatusTag returns the ntfy tag that shows a green, yellow or red circle for the status of the domain
+func (e Event) StatusTag() string {
+	switch e.Status {
+	case StatusHealthy:
+		return "green_circle"
+	case StatusWarning:
+		return "yellow_circle"
+	default:
+		return "red_circle"
+	}
+}
+
+// StatusEmoji returns a green, yellow or red circle for the status of the domain
+func (e Event) StatusEmoji() string {
+	switch e.Status {
+	case StatusHealthy:
+		return "🟢"
+	case StatusWarning:
+		return "🟡"
+	default:
+		return "🔴"
+	}
 }
 
 // targets returns what's published in DNS, which is all healthy targets if there's no priority information
@@ -97,7 +154,7 @@ func (e Event) targets() []string {
 func (e Event) Text() string {
 	var b strings.Builder
 	b.WriteString(e.Subject() + "\n\n")
-	fmt.Fprintf(&b, "Event: %s\nDomain: %s\nTime: %s\n", e.Type, e.Domain, e.Time.Format(time.RFC3339))
+	fmt.Fprintf(&b, "Event: %s\nDomain: %s\nStatus: %s %s\nTime: %s\n", e.Type, e.Domain, e.StatusEmoji(), e.Status, e.Time.Format(time.RFC3339))
 	if len(e.Previous) > 0 {
 		fmt.Fprintf(&b, "Previous records: %s\n", strings.Join(e.Previous, ", "))
 	}

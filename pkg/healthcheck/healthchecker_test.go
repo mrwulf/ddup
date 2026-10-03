@@ -506,6 +506,7 @@ func TestHealthChecker_Webhooks(t *testing.T) {
 	hc.checkAndUpdateDNS(t.Context())
 	ev := next()
 	assert.Equal(t, notify.EventDNSUpdated, ev.Type)
+	assert.Equal(t, notify.StatusHealthy, ev.Status)
 	assert.ElementsMatch(t, []string{"1.1.1.1", "2.2.2.2"}, ev.Healthy)
 
 	// Nothing changes: no event
@@ -517,6 +518,7 @@ func TestHealthChecker_Webhooks(t *testing.T) {
 	hc.checkAndUpdateDNS(t.Context())
 	ev = next()
 	assert.Equal(t, notify.EventAllUnhealthy, ev.Type)
+	assert.Equal(t, notify.StatusUnhealthy, ev.Status)
 	assert.Len(t, ev.Endpoints, 2)
 	hc.checkAndUpdateDNS(t.Context())
 	assert.Empty(t, next().Type)
@@ -532,7 +534,9 @@ func TestHealthChecker_Webhooks(t *testing.T) {
 	mockProvider.ShouldError = true
 	mockChecker.Results[1] = checker.Result{Endpoint: ep2, Healthy: true}
 	hc.checkAndUpdateDNS(t.Context())
-	assert.Equal(t, notify.EventDNSUpdateFailed, next().Type)
+	failed := next()
+	assert.Equal(t, notify.EventDNSUpdateFailed, failed.Type)
+	assert.Equal(t, notify.StatusUnhealthy, failed.Status, "a failed update is unhealthy even if the endpoints are up")
 	hc.checkAndUpdateDNS(t.Context())
 	assert.Empty(t, next().Type)
 }
@@ -753,6 +757,7 @@ func TestHealthChecker_TierChangeEvent(t *testing.T) {
 	n.Wait(5 * time.Second)
 	ev := <-events
 	assert.Equal(t, notify.EventDNSUpdated, ev.Type)
+	assert.Equal(t, notify.StatusWarning, ev.Status, "traffic failed over to the backup: some endpoints are down")
 	assert.Equal(t, []string{"tunnel.example.com"}, ev.Published)
 	assert.Equal(t, 1, ev.Tier)
 	assert.Equal(t, 0, ev.PreviousTier)

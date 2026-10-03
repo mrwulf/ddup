@@ -89,7 +89,7 @@ You can find an example of the configuration file, and a description of every op
 
 ### Domains and Endpoints
 
-- `webhooks`: Optional webhooks called on events (see `config.sample.yaml`): `url`, `method`, `headers`, `events` (`dns_updated`, `dns_update_failed`, `all_unhealthy`), `body` (Go template; JSON event if omitted; templates can use `.Subject`, `.Text`, `join` and `json`, see the email example), `timeout`, `attempts`. Deliveries are retried with exponential backoff.
+- `webhooks`: Optional webhooks called on events (see `config.sample.yaml`): `url`, `method`, `headers`, `events` (`dns_updated`, `dns_update_failed`, `all_unhealthy`), `body` (Go template; JSON event if omitted; templates can use `.Status`, `.StatusTag`, `.StatusEmoji`, `.Subject`, `.Text`, `join` and `json`, see the email example), `timeout`, `attempts`. Deliveries are retried with exponential backoff.
 - `domains`: Array of domains to manage
   - `recordName`: The DNS record to update (e.g., "api.example.com"). Can use `!env` and `!file` (see [Providers Configuration](#providers-configuration))
   - `provider`: Name of the DNS provider (from the [`providers` map](#providers-configuration))
@@ -289,6 +289,10 @@ providers:
 ### Webhooks
 
 Webhooks are called when something changes (`dns_updated`, `dns_update_failed`, `all_unhealthy`). Each webhook can filter events, set headers, and render its body from a Go template. See `config.sample.yaml` for ntfy, email and generic JSON examples.
+
+#### Status icons in ntfy
+
+Every event has a `.Status`: `healthy` when all the endpoints of the domain are healthy, `warning` when some are not (for example when traffic has failed over to a backup), and `unhealthy` when none are or the update failed, matching the dashboard. `.StatusTag` turns it into the ntfy tag for a green, yellow or red circle (`green_circle`, `yellow_circle`, `red_circle`), which ntfy shows before the title, and `.StatusEmoji` returns the emoji itself, for other services. Use it in the headers of the ntfy webhook in `config.sample.yaml`, together with a higher `Priority` when the status is `unhealthy`.
 
 #### Email with Resend (or another HTTP email API)
 

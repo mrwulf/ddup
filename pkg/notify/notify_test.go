@@ -126,3 +126,60 @@ func TestNew_DryRunCatchesTemplateErrors(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "to=ops@example.com", string(body))
 }
+
+func TestStatusAndTags(t *testing.T) {
+	up := EndpointState{Healthy: true}
+	down := EndpointState{Healthy: false}
+
+	tests := []struct {
+		name      string
+		endpoints []EndpointState
+		errMsg    string
+		want      string
+		tag       string
+		emoji     string
+	}{
+		{name: "all healthy", endpoints: []EndpointState{up, up}, want: StatusHealthy, tag: "green_circle", emoji: "🟢"},
+		{name: "some unhealthy", endpoints: []EndpointState{up, down}, want: StatusWarning, tag: "yellow_circle", emoji: "🟡"},
+		{name: "none healthy", endpoints: []EndpointState{down, down}, want: StatusUnhealthy, tag: "red_circle", emoji: "🔴"},
+		{name: "no endpoints", want: StatusUnhealthy, tag: "red_circle", emoji: "🔴"},
+		{name: "error wins", endpoints: []EndpointState{up}, errMsg: "boom", want: StatusUnhealthy, tag: "red_circle", emoji: "🔴"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status := StatusFor(tc.endpoints, tc.errMsg)
+			assert.Equal(t, tc.want, status)
+			ev := Event{Status: status, Type: EventDNSUpdated, Domain: "a.example.com", Time: time.Unix(0, 0).UTC()}
+			assert.Equal(t, tc.tag, ev.StatusTag())
+			assert.Equal(t, tc.emoji, ev.StatusEmoji())
+			assert.Contains(t, ev.Text(), "Status: "+tc.emoji+" "+tc.want)
+		})
+	}
+}
+
+func TestSampleConfigWebhooksRender(t *testing.T) {
+	// Every webhook in config.sample.yaml must pass the startup dry run of its templates, including the ntfy one that uses the status
+	raw, err := os.ReadFile("../../config.sample.yaml")
+	require.NoError(t, err)
+	cfg := config.GetDefaultConfig()
+	require.NoError(t, yaml.Unmarshal(raw, cfg))
+	require.NoError(t, cfg.Validate(slog.Default()))
+	n, err := New(cfg.Webhooks)
+	require.NoError(t, err)
+
+	var ntfy *hook
+	for _, h := range n.hooks {
+		if h.cfg.Name == "ntfy" {
+			ntfy = h
+		}
+	}
+	require.NotNil(t, ntfy, "the sample config has an ntfy webhook")
+	_, _, headers, err := ntfy.render(Event{Type: EventAllUnhealthy, Domain: "a.example.com", Status: StatusUnhealthy})
+	require.NoError(t, err)
+	assert.Equal(t, "red_circle", headers["Tags"])
+	assert.Equal(t, "high", headers["Priority"])
+	_, _, headers, err = ntfy.render(Event{Type: EventDNSUpdated, Domain: "a.example.com", Status: StatusHealthy})
+	require.NoError(t, err)
+	assert.Equal(t, "green_circle", headers["Tags"])
+	assert.Equal(t, "default", headers["Priority"])
+}

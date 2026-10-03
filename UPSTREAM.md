@@ -41,7 +41,7 @@ them to the commits on `main`, which also contain lint fixes and merges:
 | Commit on `main` | What | Depends on / notes |
 | :--------------- | :--- | :----------------- |
 | `b6b0392` | Dashboard: endpoint rows with names, and icons for CNAME, proxied, priority, active/standby and failures; legend; endpoints ordered by priority; the status API includes the endpoint name | Needs the status fields from the priorities work (`priority`, `active`, `type`, `proxied`). The CNAME icon only matters if CNAME support lands; the rest is useful with priorities alone |
-| (next commit) | Dashboard: the healthy/warning/unhealthy counts are compact pills on the search row instead of three large cards, so less scrolling, especially on phones | Standalone; applies to upstream's dashboard as it is today |
+| `9e6604d` | Dashboard: the healthy/warning/unhealthy counts are compact pills on the search row instead of three large cards, so less scrolling, especially on phones | Standalone; applies to upstream's dashboard as it is today |
 | `bcc2293` | Webhook events carry the domain's health `status` (healthy, warning, unhealthy) with `.StatusTag` (ntfy green/yellow/red circle tags) and `.StatusEmoji`; the sample ntfy webhook sets the tag and a higher priority when unhealthy | Depends on webhooks. Redo it on top of go-kit/webhook when that rework happens |
 
 ## Fork-only on purpose

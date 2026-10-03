@@ -47,15 +47,15 @@ func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.
 	for _, d := range cfg.Domains {
 		provider, ok := dnsProviders[d.Provider]
 		if !ok || provider == nil {
-			return nil, fmt.Errorf("domain '%s' references DNS provider '%s' that is not configured", d.RecordName, d.Provider)
+			return nil, fmt.Errorf("domain '%s' references DNS provider '%s' that is not configured", d.RecordName.String(), d.Provider)
 		}
 		endpoints := make(map[string]*config.ConfigEndpoint, len(d.Endpoints))
 		for _, ep := range d.Endpoints {
 			endpoints[ep.Target()] = ep
 		}
-		dcs[d.RecordName] = &domainChecker{
+		dcs[d.RecordName.String()] = &domainChecker{
 			endpoints:  endpoints,
-			checker:    checker.New(d.RecordName, d.Endpoints, d.HealthChecks, metrics),
+			checker:    checker.New(d.RecordName.String(), d.Endpoints, d.HealthChecks, metrics),
 			ttl:        d.TTL,
 			failedIPs:  make(map[string]int, 0),
 			recovering: make(map[string]int, 0),
@@ -148,12 +148,22 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		newHealthyIPs := make([]string, 0, len(results))
 		endpointStates := make([]notify.EndpointState, 0, len(results))
 		for _, result := range results {
-			ip := result.Endpoint.Target()
+			// Endpoints that look up their IP address report what they found; others have a fixed target
+			ip := result.Target
+			if ip == "" {
+				ip = result.Endpoint.Target()
+			}
 			state := notify.EndpointState{Name: result.Endpoint.Name, IP: ip, Priority: result.Endpoint.Priority, Healthy: result.Healthy}
 			if result.Error != nil {
 				state.Error = result.Error.Error()
 			}
 			endpointStates = append(endpointStates, state)
+
+			// An endpoint whose IP address has never been found has nothing we can publish or keep track of
+			if ip == "" {
+				domainLog.WarnContext(ctx, "✗ Endpoint has no IP address", "endpoint", result.Endpoint.Name, "error", result.Error)
+				continue
+			}
 
 			// If the endpoint is healthy, save it in the healthy list and remove any record of recent failed attempts
 			if result.Healthy {
@@ -193,10 +203,13 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		}
 		dc.setRecovering(recovering)
 
+		dc.noteTargets(results, newHealthyIPs, currentHealthyIPs, slices.Collect(maps.Keys(failedIPs)))
+		endpoints := dc.getEndpoints()
+
 		// Only the healthy endpoints with the lowest priority value are published
 		// The previous publication is derived from the previous healthy endpoints in the same way, so we only touch DNS when what's published changes
-		newPub := selectPublication(dc.endpoints, newHealthyIPs)
-		prevPub := selectPublication(dc.endpoints, currentHealthyIPs)
+		newPub := selectPublication(endpoints, newHealthyIPs)
+		prevPub := selectPublication(endpoints, currentHealthyIPs)
 		for i := range endpointStates {
 			endpointStates[i].Active = slices.Contains(newPub.values(), endpointStates[i].IP)
 		}

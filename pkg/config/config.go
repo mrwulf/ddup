@@ -38,8 +38,9 @@ type Config struct {
 // ConfigDomain represents a single domain and its endpoints
 type ConfigDomain struct {
 	// RecordName is the DNS record to update for this domain (e.g., "app.example.com")
+	// Can use !env and !file
 	// +required
-	RecordName string `yaml:"recordName"`
+	RecordName SecretString `yaml:"recordName"`
 
 	// Name of the DNS provider as configured in the `providers` dictionary.
 	// +required
@@ -98,33 +99,33 @@ type ConfigProvider struct {
 
 // CloudflareConfig represents Cloudflare-specific configuration
 type CloudflareConfig struct {
-	APIToken string `yaml:"apiToken"`
-	ZoneID   string `yaml:"zoneId"`
+	APIToken SecretString `yaml:"apiToken"`
+	ZoneID   SecretString `yaml:"zoneId"`
 }
 
 // OVHConfig represents OVH-specific configuration
 type OVHConfig struct {
-	APIKey      string `yaml:"apiKey"`
-	APISecret   string `yaml:"apiSecret"`
-	ConsumerKey string `yaml:"consumerKey"`
-	ZoneName    string `yaml:"zoneName"`
+	APIKey      SecretString `yaml:"apiKey"`
+	APISecret   SecretString `yaml:"apiSecret"`
+	ConsumerKey SecretString `yaml:"consumerKey"`
+	ZoneName    SecretString `yaml:"zoneName"`
 	// OVH API endpoint (defaults to EU if not specified)
 	// Valid values: "eu", "ca", "us" or full URL
-	Endpoint string `yaml:"endpoint,omitempty"`
+	Endpoint SecretString `yaml:"endpoint,omitempty"`
 }
 
 // AzureConfig represents Azure DNS-specific configuration
 type AzureConfig struct {
-	SubscriptionID    string `yaml:"subscriptionId"`
-	ResourceGroupName string `yaml:"resourceGroupName"`
-	ZoneName          string `yaml:"zoneName"`
-	TenantID          string `yaml:"tenantId"`
+	SubscriptionID    SecretString `yaml:"subscriptionId"`
+	ResourceGroupName SecretString `yaml:"resourceGroupName"`
+	ZoneName          SecretString `yaml:"zoneName"`
+	TenantID          SecretString `yaml:"tenantId"`
 	// Client ID for authenticating with a service principal
-	ClientID string `yaml:"clientId,omitempty"`
+	ClientID SecretString `yaml:"clientId,omitempty"`
 	// Client secret for authenticating with a service principal
-	ClientSecret string `yaml:"clientSecret,omitempty"`
+	ClientSecret SecretString `yaml:"clientSecret,omitempty"`
 	// Managed identity client ID for authenticating with a user-assigned managed identity
-	ManagedIdentityClientID string `yaml:"managedIdentityClientId,omitempty"`
+	ManagedIdentityClientID SecretString `yaml:"managedIdentityClientId,omitempty"`
 }
 
 // ConfigLogs represents logging configuration

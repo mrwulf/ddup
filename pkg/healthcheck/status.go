@@ -3,6 +3,8 @@ package healthcheck
 import (
 	"slices"
 	"time"
+
+	"github.com/italypaleale/ddup/pkg/dns"
 )
 
 type DomainStatus struct {
@@ -14,8 +16,10 @@ type DomainStatus struct {
 
 type DomainStatusEndpoint struct {
 	Healthy bool `json:"healthy"`
-	// IP address
-	IP       string `json:"ip"`
+	// IP address, or CNAME hostname
+	IP string `json:"ip"`
+	// Record type published for the endpoint: A, AAAA or CNAME
+	Type     string `json:"type"`
 	Proxied  bool   `json:"proxied,omitempty"`
 	Priority int    `json:"priority"`
 	// True if the endpoint is published in DNS: it's healthy and has the lowest priority value among the healthy endpoints
@@ -51,6 +55,7 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 		e := DomainStatusEndpoint{
 			Healthy:      healthy,
 			IP:           target,
+			Type:         dns.Target{Value: target}.RecordType(),
 			Active:       healthy && slices.Contains(published, target),
 			FailureCount: failureCount,
 		}

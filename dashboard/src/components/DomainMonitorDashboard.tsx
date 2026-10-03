@@ -7,8 +7,10 @@ import { cn } from '@/lib/utils'
 
 interface DomainStatusEndpoint {
   healthy: boolean
-  // IP address
+  // IP address, or CNAME hostname
   ip: string
+  // Record type: A, AAAA or CNAME
+  type?: string
   proxied?: boolean
   // Lower values are preferred
   priority?: number
@@ -384,6 +386,11 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
                                   {endpoint.healthy ? 'Healthy' : 'Unhealthy'}
                                 </Badge>
                                 <span className="font-mono text-sm">{endpoint.ip}</span>
+                                {endpoint.type === 'CNAME' && (
+                                  <Badge variant="outline" className="text-xs">
+                                    CNAME
+                                  </Badge>
+                                )}
                                 {endpoint.proxied && (
                                   <Badge variant="outline" className="text-xs">
                                     Proxied

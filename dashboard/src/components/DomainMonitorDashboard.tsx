@@ -11,6 +11,9 @@ import {
   Clock,
   Search,
   Play,
+  Sun,
+  Moon,
+  Monitor,
   Link2,
   Cloud,
   Layers,
@@ -19,6 +22,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useTheme, type Theme } from '@/lib/theme'
 import { faviconDataUrl, setFavicon, type OverallStatus } from '@/lib/favicon'
 
 interface DomainStatusEndpoint {
@@ -120,6 +124,24 @@ const SummaryPill = ({
     <span className="text-xs font-medium">{label}</span>
   </div>
 )
+
+const themeOrder: Theme[] = ['system', 'light', 'dark']
+const themeIcons: Record<Theme, LucideIcon> = { system: Monitor, light: Sun, dark: Moon }
+const themeLabels: Record<Theme, string> = { system: 'system', light: 'light', dark: 'dark' }
+
+// Icon button that cycles the theme: follow the system, light, dark
+const ThemeSwitcher = () => {
+  const { theme, setTheme } = useTheme()
+  const next = themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length]
+  const Icon = themeIcons[theme]
+  const label = `Theme: ${themeLabels[theme]} (click for ${themeLabels[next]})`
+
+  return (
+    <Button variant="outline" size="icon" onClick={() => setTheme(next)} title={label} aria-label={label}>
+      <Icon className="h-4 w-4" aria-hidden="true" />
+    </Button>
+  )
+}
 
 // Explains the icons used on the endpoints
 const Legend = () => (
@@ -451,6 +473,8 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
                 <RefreshCw className={cn('h-4 w-4', isLoading && 'animate-spin')} />
                 Refresh
               </Button>
+
+              <ThemeSwitcher />
             </div>
           </div>
         </div>

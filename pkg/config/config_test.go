@@ -267,3 +267,9 @@ func TestRecordNameFromEnv(t *testing.T) {
 	require.NoError(t, dec.Decode(&d))
 	assert.Equal(t, "home.example.com", d.RecordName.String())
 }
+
+func TestRedactURL(t *testing.T) {
+	assert.Equal(t, "https://ip.example.com/ip", RedactURL("https://user:pass@ip.example.com/ip?token=s3cret#frag"))
+	assert.Equal(t, "https://ip.example.com", RedactURL("https://ip.example.com"))
+	assert.Equal(t, "(invalid URL)", RedactURL("not a url token=s3cret"))
+}

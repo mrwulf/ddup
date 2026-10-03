@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/ui/card'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/ui/dropdown-menu'
 import {
   RefreshCw,
   Activity,
@@ -20,6 +21,7 @@ import {
   Radio,
   CirclePause,
   type LucideIcon,
+  ChevronDown,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme, type Theme } from '@/lib/theme'
@@ -441,15 +443,40 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
             )}
 
             <div className="flex flex-wrap gap-2">
-              <Button
-                variant={autoRefresh ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setAutoRefresh(!autoRefresh)}
-                className="flex items-center gap-2"
-              >
-                <Activity className="h-4 w-4" />
-                Auto-refresh {autoRefresh ? 'ON' : 'OFF'}
-              </Button>
+              {/* Split button: the main part toggles auto-refresh, the chevron opens a menu to refresh right away */}
+              <div className="flex">
+                <Button
+                  variant={autoRefresh ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setAutoRefresh(!autoRefresh)}
+                  className="flex items-center gap-2 rounded-r-none"
+                >
+                  <Activity className="h-4 w-4" />
+                  Auto-refresh {autoRefresh ? 'ON' : 'OFF'}
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant={autoRefresh ? 'default' : 'outline'}
+                      size="sm"
+                      aria-label="More refresh options"
+                      className={cn(
+                        'rounded-l-none',
+                        autoRefresh ? 'border-l border-primary-foreground/20' : 'border-l-0'
+                      )}
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={refreshClicked} disabled={isLoading}>
+                      <RefreshCw className="h-4 w-4" />
+                      Refresh now
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
 
               <Button
                 variant="outline"
@@ -461,17 +488,6 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
               >
                 <Play className={cn('h-4 w-4', isChecking && 'animate-pulse')} />
                 {isChecking ? 'Checking…' : 'Check now'}
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={refreshClicked}
-                disabled={isLoading}
-                className="flex items-center gap-2"
-              >
-                <RefreshCw className={cn('h-4 w-4', isLoading && 'animate-spin')} />
-                Refresh
               </Button>
 
               <ThemeSwitcher />

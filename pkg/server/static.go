@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/italypaleale/ddup/dashboard"
@@ -37,6 +38,14 @@ type CachingFileServer struct {
 	cacheControlHeaderValue string
 }
 
+const (
+	// Files in this folder have a hash in their name, so they never change and can be cached for a long time
+	hashedAssetsPrefix = "/assets/"
+	// Everything else (the page itself, the icon) can change when ddup is upgraded, and must be checked every time, or browsers show an old version for up to the cache time
+	revalidateCacheControl = "no-cache"
+	hashedAssetsCacheTime  = 365 * 24 * time.Hour
+)
+
 func NewCachingFileServer(root http.FileSystem, maxAge int) *CachingFileServer {
 	return &CachingFileServer{
 		root:                    root,
@@ -45,6 +54,14 @@ func NewCachingFileServer(root http.FileSystem, maxAge int) *CachingFileServer {
 		lastModifiedHeaderValue: time.Now().UTC().Format(http.TimeFormat),
 		cacheControlHeaderValue: fmt.Sprintf("public, max-age=%d", maxAge),
 	}
+}
+
+// cacheControlFor returns the Cache-Control header for a path
+func (f *CachingFileServer) cacheControlFor(path string) string {
+	if strings.HasPrefix(path, hashedAssetsPrefix) {
+		return fmt.Sprintf("public, max-age=%d, immutable", int(hashedAssetsCacheTime.Seconds()))
+	}
+	return revalidateCacheControl
 }
 
 func (f *CachingFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +76,7 @@ func (f *CachingFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Last-Modified", f.lastModifiedHeaderValue)
-	w.Header().Set("Cache-Control", f.cacheControlHeaderValue)
+	w.Header().Set("Cache-Control", f.cacheControlFor(r.URL.Path))
 
 	http.FileServer(f.root).ServeHTTP(w, r)
 }

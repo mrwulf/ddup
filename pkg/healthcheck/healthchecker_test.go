@@ -759,3 +759,107 @@ func TestHealthChecker_TierChangeEvent(t *testing.T) {
 	assert.Contains(t, ev.Subject(), "now points to tunnel.example.com")
 	assert.Contains(t, ev.Text(), "Priority: 1 (was 0)")
 }
+
+func TestHealthChecker_DynamicIP(t *testing.T) {
+	mockProvider := dns.NewMockProvider(false)
+	// A DDNS-style endpoint: no fixed target, proxied, with a lookup that returns the current address
+	home := &config.ConfigEndpoint{Name: "home", Proxied: true, IPLookup: &config.ConfigIPLookup{URLs: []string{"https://ip.example.com"}}}
+	mockChecker := &checker.MockChecker{Domain: "home.example.com", MaxAttempts: 2}
+	hc := &HealthChecker{
+		domainCheckers: map[string]*domainChecker{
+			"home.example.com": {checker: mockChecker, ttl: 60, failedIPs: make(map[string]int), provider: mockProvider},
+		},
+	}
+	dc := hc.domainCheckers["home.example.com"]
+
+	run := func(target string, healthy bool) {
+		t.Helper()
+		var err error
+		if !healthy {
+			err = errors.New("lookup failed")
+		}
+		mockChecker.Results = []checker.Result{{Endpoint: home, Target: target, Healthy: healthy, Error: err}}
+		hc.checkAndUpdateDNS(t.Context())
+	}
+
+	// First lookup publishes the address, with the settings of the endpoint
+	run("203.0.113.1", true)
+	assert.Equal(t, 1, mockProvider.CallCount)
+	assert.Equal(t, []dns.Target{{Value: "203.0.113.1", Proxied: true}}, mockProvider.LastTargets)
+
+	// Nothing changes
+	run("203.0.113.1", true)
+	assert.Equal(t, 1, mockProvider.CallCount)
+
+	// The address changes: DNS is updated, and the proxied setting carries over
+	run("203.0.113.2", true)
+	assert.Equal(t, 2, mockProvider.CallCount)
+	assert.Equal(t, []dns.Target{{Value: "203.0.113.2", Proxied: true}}, mockProvider.LastTargets)
+	assert.Equal(t, []string{"203.0.113.2"}, dc.healthyIPs)
+
+	// A failed lookup is reported against the last address, and DNS is left alone while there are retries left
+	run("203.0.113.2", false)
+	assert.Equal(t, 2, mockProvider.CallCount)
+	assert.Equal(t, []string{"203.0.113.2"}, dc.healthyIPs)
+	assert.Equal(t, 1, dc.failedIPs["203.0.113.2"])
+
+	// A new lookup that works resets it
+	run("203.0.113.2", true)
+	assert.Empty(t, dc.failedIPs)
+
+	// An endpoint that has never found an address is ignored, and DNS is not touched
+	other := &config.ConfigEndpoint{Name: "other", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://ip.example.com"}}}
+	mockChecker.Results = []checker.Result{{Endpoint: other, Target: "", Healthy: false, Error: errors.New("lookup failed")}}
+	dc.healthyIPs = nil
+	hc.checkAndUpdateDNS(t.Context())
+	assert.Equal(t, 2, mockProvider.CallCount)
+	assert.Empty(t, dc.failedIPs)
+
+	// Old addresses are forgotten, so the endpoints of the domain don't grow forever
+	for i := 3; i < 8; i++ {
+		run("203.0.113."+string(rune('0'+i)), true)
+	}
+	assert.LessOrEqual(t, len(dc.getEndpoints()), 2)
+}
+
+func TestHealthChecker_DynamicIP_SameAddressFromTwoLookups(t *testing.T) {
+	mockProvider := dns.NewMockProvider(false)
+	primary := &config.ConfigEndpoint{Name: "primary", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://a.example.com"}}}
+	fallback := &config.ConfigEndpoint{Name: "fallback", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://b.example.com"}}}
+	mockChecker := &checker.MockChecker{Domain: "home.example.com", MaxAttempts: 2}
+	hc := &HealthChecker{
+		domainCheckers: map[string]*domainChecker{
+			"home.example.com": {checker: mockChecker, ttl: 60, failedIPs: make(map[string]int), provider: mockProvider},
+		},
+	}
+
+	// Both lookups find the same address: it must be published once
+	mockChecker.Results = []checker.Result{
+		{Endpoint: primary, Target: "203.0.113.1", Healthy: true},
+		{Endpoint: fallback, Target: "203.0.113.1", Healthy: true},
+	}
+	hc.checkAndUpdateDNS(t.Context())
+	assert.Equal(t, 1, mockProvider.CallCount)
+	assert.Equal(t, []dns.Target{{Value: "203.0.113.1"}}, mockProvider.LastTargets)
+	assert.Equal(t, []string{"203.0.113.1"}, hc.domainCheckers["home.example.com"].healthyIPs)
+}
+
+func TestDedupeResults(t *testing.T) {
+	a := &config.ConfigEndpoint{Name: "a", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://a.example.com"}}}
+	b := &config.ConfigEndpoint{Name: "b", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://b.example.com"}}}
+	static := &config.ConfigEndpoint{Name: "static", IP: "198.51.100.1"}
+	noAddr := &config.ConfigEndpoint{Name: "none", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://c.example.com"}}}
+
+	in := []checker.Result{
+		{Endpoint: a, Target: "203.0.113.1", Healthy: false},
+		{Endpoint: b, Target: "203.0.113.1", Healthy: true},
+		{Endpoint: static, Target: "198.51.100.1", Healthy: true},
+		{Endpoint: noAddr},
+		{Endpoint: noAddr},
+	}
+	out := dedupeResults(in)
+	require.Len(t, out, 4)
+	assert.Equal(t, "b", out[0].Endpoint.Name, "a healthy result wins over an unhealthy one")
+	assert.Equal(t, "static", out[1].Endpoint.Name)
+	assert.Equal(t, "none", out[2].Endpoint.Name, "results without a target are kept")
+}

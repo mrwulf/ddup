@@ -18,6 +18,7 @@ type domainChecker struct {
 	failedIPs  map[string]int
 	provider   dns.Provider
 	// Endpoints by target (IP or CNAME hostname); may be nil, in which case all targets have priority 0 and are not proxied
+	// Endpoints that look up their IP address are added when their address is found, and removed when it's not used any more
 	endpoints   map[string]*config.ConfigEndpoint
 	lastUpdated time.Time
 	lastError   string
@@ -90,4 +91,73 @@ func (dc *domainChecker) swapNotifiedError(v string) string {
 	prev := dc.notifiedError
 	dc.notifiedError = v
 	return prev
+}
+
+// getEndpoints returns a copy of the endpoints by target
+func (dc *domainChecker) getEndpoints() map[string]*config.ConfigEndpoint {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	return maps.Clone(dc.endpoints)
+}
+
+// noteTargets records the endpoints that look up their IP address under the address they found
+// Endpoints whose address is not in the keep list (the current and previous targets) are forgotten
+func (dc *domainChecker) noteTargets(results []checker.Result, keep ...[]string) {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	if dc.endpoints == nil {
+		dc.endpoints = make(map[string]*config.ConfigEndpoint)
+	}
+
+	keepSet := make(map[string]struct{})
+	for _, list := range keep {
+		for _, t := range list {
+			keepSet[t] = struct{}{}
+		}
+	}
+
+	for _, r := range results {
+		if r.Endpoint.Dynamic() && r.Target != "" {
+			dc.endpoints[r.Target] = r.Endpoint
+			keepSet[r.Target] = struct{}{}
+		}
+	}
+
+	for target, ep := range dc.endpoints {
+		_, ok := keepSet[target]
+		if !ok && ep.Dynamic() {
+			delete(dc.endpoints, target)
+		}
+	}
+}
+
+// dedupeResults keeps one result per target
+// Endpoints that look up their IP address can find the same one (for example, a primary and a fallback lookup service), and a target must be published only once
+// If one of the results is healthy it wins; otherwise the first is kept
+func dedupeResults(results []checker.Result) []checker.Result {
+	index := make(map[string]int, len(results))
+	out := make([]checker.Result, 0, len(results))
+	for _, r := range results {
+		target := r.Target
+		if target == "" {
+			target = r.Endpoint.Target()
+		}
+		// Results without a target are kept as they are, since they can't clash with anything
+		if target == "" {
+			out = append(out, r)
+			continue
+		}
+
+		i, ok := index[target]
+		switch {
+		case !ok:
+			index[target] = len(out)
+			out = append(out, r)
+		case r.Healthy && !out[i].Healthy:
+			out[i] = r
+		}
+	}
+	return out
 }

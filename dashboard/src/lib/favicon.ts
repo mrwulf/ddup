@@ -8,13 +8,6 @@ const badgeColors: Record<OverallStatus, string> = {
     unknown: '#9ca3af',
 }
 
-const statusEmoji: Record<OverallStatus, string> = {
-    healthy: '🟢',
-    warning: '🟡',
-    unhealthy: '🔴',
-    unknown: '',
-}
-
 // Draws the icon, a "d" on a rounded square, with a colored badge for the status
 export const faviconDataUrl = (status: OverallStatus): string | null => {
     const size = 64
@@ -53,27 +46,6 @@ export const faviconDataUrl = (status: OverallStatus): string | null => {
     ctx.fill()
 
     return canvas.toDataURL('image/png')
-}
-
-// Title of the page, which shows the status with a colored circle, the counts of domains that need attention, and the app name
-export const statusTitle = (
-    status: OverallStatus,
-    counts: { warning: number; unhealthy: number },
-    unreachable: boolean
-): string => {
-    if (unreachable) {
-        return '🔴 unreachable · ddup'
-    }
-
-    const parts: string[] = []
-    if (counts.unhealthy > 0) {
-        parts.push(`${counts.unhealthy} unhealthy`)
-    }
-    if (counts.warning > 0) {
-        parts.push(`${counts.warning} warning`)
-    }
-    const emoji = statusEmoji[status]
-    return [emoji && `${emoji} ${parts.join(', ')}`.trim(), 'ddup'].filter(Boolean).join(' · ')
 }
 
 // Updates the icon of the tab

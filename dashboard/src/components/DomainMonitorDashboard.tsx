@@ -19,7 +19,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { faviconDataUrl, setFavicon, statusTitle, type OverallStatus } from '@/lib/favicon'
+import { faviconDataUrl, setFavicon, type OverallStatus } from '@/lib/favicon'
 
 interface DomainStatusEndpoint {
   // Name of the endpoint, if it has one
@@ -377,7 +377,7 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
     return domainMatches || endpointMatches
   })
 
-  // The tab shows the worst status of all the domains (not only the ones matching the search), in its icon and its title
+  // The icon of the tab shows the worst status of all the domains (not only the ones matching the search); the title stays as it is
   const overallCounts = {
     warning: domains.filter((d) => getDomainStatus(d) === 'warning').length,
     unhealthy: domains.filter((d) => getDomainStatus(d) === 'unhealthy').length,
@@ -390,16 +390,12 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
   } else if (domains.length > 0) {
     overallStatus = 'healthy'
   }
-  const unreachable = !!error
   useEffect(() => {
-    document.title = statusTitle(overallStatus, overallCounts, unreachable)
     const icon = faviconDataUrl(overallStatus)
     if (icon) {
       setFavicon(icon)
     }
-    // The counts are derived from overallStatus and the domains, which are what we depend on
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overallStatus, overallCounts.warning, overallCounts.unhealthy, unreachable])
+  }, [overallStatus])
 
   const healthyDomains = filteredDomains.filter((d) => getDomainStatus(d) === 'healthy').length
   const warningDomains = filteredDomains.filter((d) => getDomainStatus(d) === 'warning').length

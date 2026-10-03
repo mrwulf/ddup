@@ -140,3 +140,41 @@ func TestValidateWebhooks_TemplateFuncs(t *testing.T) {
 	cfg := &Config{Webhooks: []ConfigWebhook{{URL: "https://x.example.com", Body: `{{ join .Healthy ", " }} {{ json .Endpoints }}`}}}
 	require.NoError(t, cfg.validateWebhooks())
 }
+
+func TestValidateEndpoints_Targets(t *testing.T) {
+	cloudflare := ConfigProvider{Cloudflare: &CloudflareConfig{}}
+	ovh := ConfigProvider{OVH: &OVHConfig{}}
+
+	tests := []struct {
+		name      string
+		provider  ConfigProvider
+		endpoints []*ConfigEndpoint
+		errSubstr string
+	}{
+		{name: "duplicate target", provider: cloudflare, endpoints: []*ConfigEndpoint{
+			{URL: "https://a", IP: "1.1.1.1"}, {URL: "https://b", IP: "1.1.1.1"},
+		}, errSubstr: "more than one endpoint"},
+		{name: "missing ip", provider: cloudflare, endpoints: []*ConfigEndpoint{{URL: "https://a"}}, errSubstr: "IP is empty"},
+		{name: "invalid ip", provider: cloudflare, endpoints: []*ConfigEndpoint{{URL: "https://a", IP: "nope"}}, errSubstr: "not a valid IPv4 or IPv6"},
+		{name: "proxied needs cloudflare", provider: ovh, endpoints: []*ConfigEndpoint{{URL: "https://a", IP: "1.1.1.1", Proxied: true}}, errSubstr: "only supported by the Cloudflare provider"},
+		{name: "proxied with cloudflare", provider: cloudflare, endpoints: []*ConfigEndpoint{
+			{URL: "https://a", IP: "1.1.1.1", Proxied: true}, {URL: "https://b", IP: "2.2.2.2"},
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{
+				Providers: map[string]ConfigProvider{"p": tc.provider},
+				Domains:   []ConfigDomain{{RecordName: "app.example.com", Provider: "p", Endpoints: tc.endpoints}},
+			}
+			err := cfg.Validate(slog.Default())
+			if tc.errSubstr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errSubstr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}

@@ -157,12 +157,21 @@ type ConfigEndpoint struct {
 	URL string `yaml:"url"`
 
 	// IP address to include in DNS records when healthy
+	// IPv4 addresses create A records and IPv6 addresses create AAAA records
 	// +required
 	IP string `yaml:"ip"`
+
+	// If true, the record is proxied by the DNS provider (Cloudflare only)
+	Proxied bool `yaml:"proxied"`
 
 	// Hostname to include in the requests
 	// This can be used when the request is made to an IP address or to a hostname different from the desired one
 	Host string `yaml:"host"`
+}
+
+// Target returns what the endpoint publishes in DNS: its IP address
+func (e *ConfigEndpoint) Target() string {
+	return e.IP
 }
 
 type ConfigProvider struct {
@@ -328,25 +337,51 @@ func (c *Config) Validate(logger *slog.Logger) error {
 		}
 
 		// Validate endpoints for this domain
-		for ei, v := range d.Endpoints {
-			if v.URL == "" {
-				return fmt.Errorf("domain %s endpoint %d is invalid: URL is empty", d.RecordName, ei)
-			}
-			if v.IP == "" {
-				return fmt.Errorf("domain %s endpoint %d is invalid: IP is empty", d.RecordName, ei)
-			}
-			ip, err := netip.ParseAddr(v.IP)
-			if err != nil {
-				return fmt.Errorf("domain %s endpoint %d is invalid: IP %q is not a valid IPv4 or IPv6 address", d.RecordName, ei, v.IP)
-			}
-			v.IP = ip.String()
-			if v.Name == "" {
-				v.Name = v.URL
-			}
+		err = c.validateEndpoints(d)
+		if err != nil {
+			return err
 		}
 	}
 
 	return c.validateWebhooks()
+}
+
+func (c *Config) validateEndpoints(d *ConfigDomain) error {
+	// Features only the Cloudflare provider supports
+	cloudflare := c.Providers[d.Provider].Cloudflare != nil
+
+	targets := make(map[string]struct{}, len(d.Endpoints))
+
+	for ei, v := range d.Endpoints {
+		if v.URL == "" {
+			return fmt.Errorf("domain %s endpoint %d is invalid: URL is empty", d.RecordName, ei)
+		}
+		if v.IP == "" {
+			return fmt.Errorf("domain %s endpoint %d is invalid: IP is empty", d.RecordName, ei)
+		}
+
+		ip, err := netip.ParseAddr(v.IP)
+		if err != nil {
+			return fmt.Errorf("domain %s endpoint %d is invalid: IP %q is not a valid IPv4 or IPv6 address", d.RecordName, ei, v.IP)
+		}
+		v.IP = ip.String()
+
+		if v.Proxied && !cloudflare {
+			return fmt.Errorf("domain %s endpoint %d is invalid: proxied is only supported by the Cloudflare provider", d.RecordName, ei)
+		}
+
+		_, dup := targets[v.Target()]
+		if dup {
+			return fmt.Errorf("domain %s endpoint %d is invalid: %s is used by more than one endpoint", d.RecordName, ei, v.Target())
+		}
+		targets[v.Target()] = struct{}{}
+
+		if v.Name == "" {
+			v.Name = v.URL
+		}
+	}
+
+	return nil
 }
 
 // WebhookTemplateFuncs are the functions available in webhook body and header templates

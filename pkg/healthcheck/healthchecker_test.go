@@ -636,3 +636,47 @@ func TestHealthChecker_NoNotificationWhenDNSAlreadyUpToDate(t *testing.T) {
 	assert.Equal(t, notify.EventDNSUpdated, ev.Type)
 	assert.Equal(t, []string{"9.9.9.9"}, ev.Previous)
 }
+
+func TestHealthChecker_ProxiedTargets(t *testing.T) {
+	mockProvider := dns.NewMockProvider(false)
+	proxied := &config.ConfigEndpoint{Name: "proxied", IP: "1.1.1.1", Proxied: true}
+	plain := &config.ConfigEndpoint{Name: "plain", IP: "2.2.2.2"}
+	mockChecker := &checker.MockChecker{
+		Domain:      "example.com",
+		MaxAttempts: 1,
+		Results:     []checker.Result{{Endpoint: proxied, Healthy: true}, {Endpoint: plain, Healthy: true}},
+	}
+	hc := &HealthChecker{
+		domainCheckers: map[string]*domainChecker{
+			"example.com": {
+				checker:   mockChecker,
+				ttl:       60,
+				failedIPs: make(map[string]int),
+				provider:  mockProvider,
+				endpoints: map[string]*config.ConfigEndpoint{"1.1.1.1": proxied, "2.2.2.2": plain},
+			},
+		},
+	}
+
+	// The proxied setting of each endpoint is passed to the provider
+	hc.checkAndUpdateDNS(t.Context())
+	assert.Equal(t, 1, mockProvider.CallCount)
+	assert.ElementsMatch(t, []dns.Target{{Value: "1.1.1.1", Proxied: true}, {Value: "2.2.2.2"}}, mockProvider.LastTargets)
+
+	// Nothing changes, so DNS is not touched
+	hc.checkAndUpdateDNS(t.Context())
+	assert.Equal(t, 1, mockProvider.CallCount)
+
+	// The status exposes the proxied setting
+	byIP := map[string]bool{}
+	for _, e := range hc.GetDomainStatus("example.com").Endpoints {
+		byIP[e.IP] = e.Proxied
+	}
+	assert.Equal(t, map[string]bool{"1.1.1.1": true, "2.2.2.2": false}, byIP)
+
+	// An endpoint that goes down is removed, and the other keeps its setting
+	mockChecker.Results = []checker.Result{{Endpoint: proxied, Healthy: false, Error: errors.New("down")}, {Endpoint: plain, Healthy: true}}
+	hc.checkAndUpdateDNS(t.Context())
+	assert.Equal(t, 2, mockProvider.CallCount)
+	assert.Equal(t, []dns.Target{{Value: "2.2.2.2"}}, mockProvider.LastTargets)
+}

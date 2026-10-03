@@ -38,6 +38,8 @@ domains:
       - name: "foo2"
         url: "http://192.168.1.201:9000/health"
         ip: "192.168.1.201"
+        # Proxy the record through Cloudflare (Cloudflare provider only)
+        # proxied: true
 
 # Provider Configuration
 providers:

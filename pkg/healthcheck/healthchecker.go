@@ -49,7 +49,12 @@ func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.
 		if !ok || provider == nil {
 			return nil, fmt.Errorf("domain '%s' references DNS provider '%s' that is not configured", d.RecordName, d.Provider)
 		}
+		endpoints := make(map[string]*config.ConfigEndpoint, len(d.Endpoints))
+		for _, ep := range d.Endpoints {
+			endpoints[ep.Target()] = ep
+		}
 		dcs[d.RecordName] = &domainChecker{
+			endpoints:  endpoints,
 			checker:    checker.New(d.RecordName, d.Endpoints, d.HealthChecks, metrics),
 			ttl:        d.TTL,
 			failedIPs:  make(map[string]int, 0),
@@ -143,7 +148,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		newHealthyIPs := make([]string, 0, len(results))
 		endpointStates := make([]notify.EndpointState, 0, len(results))
 		for _, result := range results {
-			ip := result.Endpoint.IP
+			ip := result.Endpoint.Target()
 			state := notify.EndpointState{Name: result.Endpoint.Name, IP: ip, Healthy: result.Healthy}
 			if result.Error != nil {
 				state.Error = result.Error.Error()
@@ -188,6 +193,10 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		}
 		dc.setRecovering(recovering)
 
+		// What we publish includes whether the records are proxied, so a change of that setting is also an update
+		newPub := selectPublication(dc.endpoints, newHealthyIPs)
+		prevPub := selectPublication(dc.endpoints, currentHealthyIPs)
+
 		event := notify.Event{
 			Domain:    domainName,
 			Healthy:   newHealthyIPs,
@@ -204,12 +213,12 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 			dc.swapAllDown(false)
 		}
 
-		// Check if healthy IPs have changed
-		if !utils.ElementsMatch(currentHealthyIPs, newHealthyIPs) {
+		// Check if what we publish has changed
+		if !utils.ElementsMatch(prevPub.keys(), newPub.keys()) {
 			// Update DNS records
 			if len(newHealthyIPs) > 0 {
 				var res dns.UpdateResult
-				res, err = dc.provider.UpdateRecords(ctx, dc.checker.GetDomain(), dc.ttl, newHealthyIPs)
+				res, err = dc.provider.UpdateRecords(ctx, dc.checker.GetDomain(), dc.ttl, newPub.targets)
 				if err != nil {
 					domainLog.ErrorContext(ctx, "Error updating DNS records", "error", err)
 					dc.setError("Error updating DNS records: " + err.Error())

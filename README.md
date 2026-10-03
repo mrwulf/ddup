@@ -104,6 +104,7 @@ You can find an example of the configuration file, and a description of every op
     - `name`: Friendly name for the endpoint, used for logging (optional)
     - `url`: HTTP URL to check for health status
     - `ip`: The IPv4 or IPv6 address to include in DNS records when healthy. IPv4 addresses create A records and IPv6 addresses create AAAA records
+    - `proxied`: If true, the record is proxied by Cloudflare (Cloudflare only). Proxied records use Cloudflare's automatic TTL
     - `host`: Optional hostname to include in the requests, when the request is made to an IP address or to a hostname different from the desired one
 
 ### Providers Configuration

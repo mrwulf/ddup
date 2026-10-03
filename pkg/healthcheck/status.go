@@ -12,8 +12,10 @@ type DomainStatus struct {
 }
 
 type DomainStatusEndpoint struct {
-	Healthy      bool   `json:"healthy"`
+	Healthy bool `json:"healthy"`
+	// IP address
 	IP           string `json:"ip"`
+	Proxied      bool   `json:"proxied,omitempty"`
 	FailureCount int    `json:"failureCount,omitempty"`
 }
 
@@ -40,22 +42,27 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 
 	// Endpoints in the unhealthy list could also be in the healthy one,
 	// if they failed a recent health check but still less than the max attempts
+	newEndpoint := func(target string, healthy bool, failureCount int) DomainStatusEndpoint {
+		e := DomainStatusEndpoint{
+			Healthy:      healthy,
+			IP:           target,
+			FailureCount: failureCount,
+		}
+		ep := dc.endpoints[target]
+		if ep != nil {
+			e.Proxied = ep.Proxied
+		}
+		return e
+	}
+
 	endpoints := make([]DomainStatusEndpoint, 0, len(healthy)+len(unhealthy))
 	for _, ip := range healthy {
-		endpoints = append(endpoints, DomainStatusEndpoint{
-			Healthy:      true,
-			IP:           ip,
-			FailureCount: unhealthy[ip],
-		})
+		endpoints = append(endpoints, newEndpoint(ip, true, unhealthy[ip]))
 	}
 	for ip, attempts := range unhealthy {
 		// If the number of attempts is less than the max, the endpoint was in the healthy list too
 		if attempts >= dc.checker.GetMaxAttempts() {
-			endpoints = append(endpoints, DomainStatusEndpoint{
-				Healthy:      false,
-				IP:           ip,
-				FailureCount: attempts,
-			})
+			endpoints = append(endpoints, newEndpoint(ip, false, attempts))
 		}
 	}
 

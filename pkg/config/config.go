@@ -162,7 +162,14 @@ type ConfigEndpoint struct {
 	IP string `yaml:"ip"`
 
 	// If true, the record is proxied by the DNS provider (Cloudflare only)
+	// All endpoints with the same priority must use the same value
 	Proxied bool `yaml:"proxied"`
+
+	// Priority of the endpoint; lower values are preferred
+	// Only the healthy endpoints with the lowest priority value are published, and when none are healthy ddup falls back to the next priority
+	// Endpoints with the same priority are all published together (round-robin)
+	// Defaults to 0
+	Priority int `yaml:"priority"`
 
 	// Hostname to include in the requests
 	// This can be used when the request is made to an IP address or to a hostname different from the desired one
@@ -351,6 +358,10 @@ func (c *Config) validateEndpoints(d *ConfigDomain) error {
 	cloudflare := c.Providers[d.Provider].Cloudflare != nil
 
 	targets := make(map[string]struct{}, len(d.Endpoints))
+	type tier struct {
+		proxied bool
+	}
+	tiers := make(map[int]*tier)
 
 	for ei, v := range d.Endpoints {
 		if v.URL == "" {
@@ -358,6 +369,9 @@ func (c *Config) validateEndpoints(d *ConfigDomain) error {
 		}
 		if v.IP == "" {
 			return fmt.Errorf("domain %s endpoint %d is invalid: IP is empty", d.RecordName, ei)
+		}
+		if v.Priority < 0 {
+			return fmt.Errorf("domain %s endpoint %d is invalid: priority must not be negative", d.RecordName, ei)
 		}
 
 		ip, err := netip.ParseAddr(v.IP)
@@ -378,6 +392,15 @@ func (c *Config) validateEndpoints(d *ConfigDomain) error {
 
 		if v.Name == "" {
 			v.Name = v.URL
+		}
+
+		t := tiers[v.Priority]
+		if t == nil {
+			t = &tier{proxied: v.Proxied}
+			tiers[v.Priority] = t
+		}
+		if t.proxied != v.Proxied {
+			return fmt.Errorf("domain %s endpoint %d is invalid: endpoints with priority %d must all have the same value for proxied", d.RecordName, ei, v.Priority)
 		}
 	}
 

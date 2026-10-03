@@ -1,6 +1,7 @@
 package healthcheck
 
 import (
+	"slices"
 	"time"
 )
 
@@ -14,9 +15,12 @@ type DomainStatus struct {
 type DomainStatusEndpoint struct {
 	Healthy bool `json:"healthy"`
 	// IP address
-	IP           string `json:"ip"`
-	Proxied      bool   `json:"proxied,omitempty"`
-	FailureCount int    `json:"failureCount,omitempty"`
+	IP       string `json:"ip"`
+	Proxied  bool   `json:"proxied,omitempty"`
+	Priority int    `json:"priority"`
+	// True if the endpoint is published in DNS: it's healthy and has the lowest priority value among the healthy endpoints
+	Active       bool `json:"active"`
+	FailureCount int  `json:"failureCount,omitempty"`
 }
 
 func (hc *HealthChecker) GetAllDomainsStatus() map[string]DomainStatus {
@@ -42,14 +46,17 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 
 	// Endpoints in the unhealthy list could also be in the healthy one,
 	// if they failed a recent health check but still less than the max attempts
+	published := selectPublication(dc.endpoints, healthy).values()
 	newEndpoint := func(target string, healthy bool, failureCount int) DomainStatusEndpoint {
 		e := DomainStatusEndpoint{
 			Healthy:      healthy,
 			IP:           target,
+			Active:       healthy && slices.Contains(published, target),
 			FailureCount: failureCount,
 		}
 		ep := dc.endpoints[target]
 		if ep != nil {
+			e.Priority = ep.Priority
 			e.Proxied = ep.Proxied
 		}
 		return e

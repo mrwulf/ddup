@@ -141,7 +141,7 @@ func TestValidateWebhooks_TemplateFuncs(t *testing.T) {
 	require.NoError(t, cfg.validateWebhooks())
 }
 
-func TestValidateEndpoints_Targets(t *testing.T) {
+func TestValidateEndpoints_TiersAndTargets(t *testing.T) {
 	cloudflare := ConfigProvider{Cloudflare: &CloudflareConfig{}}
 	ovh := ConfigProvider{OVH: &OVHConfig{}}
 
@@ -151,14 +151,21 @@ func TestValidateEndpoints_Targets(t *testing.T) {
 		endpoints []*ConfigEndpoint
 		errSubstr string
 	}{
+		{name: "ips with priorities", provider: cloudflare, endpoints: []*ConfigEndpoint{
+			{URL: "https://a", IP: "1.1.1.1"}, {URL: "https://b", IP: "2.2.2.2"}, {URL: "https://c", IP: "3.3.3.3", Priority: 1},
+		}},
+		{name: "mixed proxied in a priority", provider: cloudflare, endpoints: []*ConfigEndpoint{
+			{URL: "https://a", IP: "1.1.1.1", Proxied: true}, {URL: "https://b", IP: "2.2.2.2"},
+		}, errSubstr: "same value for proxied"},
 		{name: "duplicate target", provider: cloudflare, endpoints: []*ConfigEndpoint{
-			{URL: "https://a", IP: "1.1.1.1"}, {URL: "https://b", IP: "1.1.1.1"},
+			{URL: "https://a", IP: "1.1.1.1"}, {URL: "https://b", IP: "1.1.1.1", Priority: 1},
 		}, errSubstr: "more than one endpoint"},
+		{name: "negative priority", provider: cloudflare, endpoints: []*ConfigEndpoint{{URL: "https://a", IP: "1.1.1.1", Priority: -1}}, errSubstr: "must not be negative"},
 		{name: "missing ip", provider: cloudflare, endpoints: []*ConfigEndpoint{{URL: "https://a"}}, errSubstr: "IP is empty"},
 		{name: "invalid ip", provider: cloudflare, endpoints: []*ConfigEndpoint{{URL: "https://a", IP: "nope"}}, errSubstr: "not a valid IPv4 or IPv6"},
 		{name: "proxied needs cloudflare", provider: ovh, endpoints: []*ConfigEndpoint{{URL: "https://a", IP: "1.1.1.1", Proxied: true}}, errSubstr: "only supported by the Cloudflare provider"},
-		{name: "proxied with cloudflare", provider: cloudflare, endpoints: []*ConfigEndpoint{
-			{URL: "https://a", IP: "1.1.1.1", Proxied: true}, {URL: "https://b", IP: "2.2.2.2"},
+		{name: "priorities work with any provider", provider: ovh, endpoints: []*ConfigEndpoint{
+			{URL: "https://a", IP: "1.1.1.1"}, {URL: "https://b", IP: "2.2.2.2", Priority: 1},
 		}},
 	}
 

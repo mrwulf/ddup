@@ -149,7 +149,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		endpointStates := make([]notify.EndpointState, 0, len(results))
 		for _, result := range results {
 			ip := result.Endpoint.Target()
-			state := notify.EndpointState{Name: result.Endpoint.Name, IP: ip, Healthy: result.Healthy}
+			state := notify.EndpointState{Name: result.Endpoint.Name, IP: ip, Priority: result.Endpoint.Priority, Healthy: result.Healthy}
 			if result.Error != nil {
 				state.Error = result.Error.Error()
 			}
@@ -193,15 +193,22 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		}
 		dc.setRecovering(recovering)
 
-		// What we publish includes whether the records are proxied, so a change of that setting is also an update
+		// Only the healthy endpoints with the lowest priority value are published
+		// The previous publication is derived from the previous healthy endpoints in the same way, so we only touch DNS when what's published changes
 		newPub := selectPublication(dc.endpoints, newHealthyIPs)
 		prevPub := selectPublication(dc.endpoints, currentHealthyIPs)
+		for i := range endpointStates {
+			endpointStates[i].Active = slices.Contains(newPub.values(), endpointStates[i].IP)
+		}
 
 		event := notify.Event{
-			Domain:    domainName,
-			Healthy:   newHealthyIPs,
-			Previous:  currentHealthyIPs,
-			Endpoints: endpointStates,
+			Domain:       domainName,
+			Healthy:      newHealthyIPs,
+			Published:    newPub.values(),
+			Tier:         newPub.priority,
+			PreviousTier: prevPub.priority,
+			Previous:     currentHealthyIPs,
+			Endpoints:    endpointStates,
 		}
 
 		// Notify when we transition to having no healthy endpoints; we don't repeat the notification on every cycle
@@ -236,19 +243,19 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 
 				dc.swapNotifiedError("")
 				if res.Changed {
-					domainLog.InfoContext(ctx, "Updated DNS records", "ips", newHealthyIPs, "previous", res.Previous)
+					domainLog.InfoContext(ctx, "Updated DNS records", "targets", event.Published, "priority", newPub.priority, "previous", res.Previous)
 					event.Type = notify.EventDNSUpdated
 					event.Previous = res.Previous
 					hc.notifier.Notify(ctx, event)
 				} else {
 					// For example on startup, when DNS already reflects the healthy endpoints
-					domainLog.InfoContext(ctx, "DNS records already up to date", "ips", newHealthyIPs)
+					domainLog.InfoContext(ctx, "DNS records already up to date", "targets", event.Published, "priority", newPub.priority)
 				}
 			} else {
 				domainLog.WarnContext(ctx, "No healthy endpoints found, not updating DNS")
 			}
 		} else {
-			domainLog.DebugContext(ctx, "Healthy IPs unchanged, skipping DNS update", "healthy", newHealthyIPs)
+			domainLog.DebugContext(ctx, "Published targets unchanged, skipping DNS update", "healthy", newHealthyIPs, "published", event.Published)
 		}
 
 		// Update the stored previous IPs

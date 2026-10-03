@@ -10,6 +10,10 @@ interface DomainStatusEndpoint {
   // IP address
   ip: string
   proxied?: boolean
+  // Lower values are preferred
+  priority?: number
+  // True if published in DNS
+  active?: boolean
   failureCount?: number
 }
 
@@ -21,6 +25,9 @@ interface DomainStatus {
 }
 
 type DomainsResponse = Record<string, DomainStatus>
+
+// True if the endpoints have more than one priority, so it matters which of them are published
+const hasTiers = (status: DomainStatus): boolean => new Set(status.endpoints.map((e) => e.priority ?? 0)).size > 1
 
 type Domain = {
   name: string
@@ -384,6 +391,12 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
                                 )}
                               </div>
                               <div className="text-right text-xs text-muted-foreground">
+                                {hasTiers(domain.status) && (
+                                  <div>
+                                    Priority {endpoint.priority ?? 0}
+                                    {endpoint.healthy && (endpoint.active ? ' · in DNS' : ' · standby')}
+                                  </div>
+                                )}
                                 <div>Failures: {endpoint.failureCount || '0'}</div>
                               </div>
                             </div>

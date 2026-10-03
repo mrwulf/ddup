@@ -81,14 +81,42 @@ func (m mockStatusProvider) GetAllDomainsStatus() map[string]healthcheck.DomainS
 				{IP: "3.3.3.3", Healthy: false, FailureCount: 7},
 			},
 		},
+		"ingress-lb.example.com": {
+			LastUpdated: now.Add(-3 * time.Second),
+			Provider:    provider1,
+			Error:       "",
+			Endpoints: []healthcheck.DomainStatusEndpoint{
+				{Name: "vps-us", IP: "40.160.95.84", Type: "A", Healthy: true, Priority: 0, Active: true},
+				{Name: "vps-eu", IP: "94.130.99.118", Type: "A", Healthy: true, Priority: 0, Active: true},
+				{Name: "tunnel", IP: "5385b994-4f7e-4a1c-877b-735fa8f8486e.cfargotunnel.com", Type: "CNAME", Proxied: true, Healthy: true, Priority: 1},
+			},
+		},
+		"fast-lb.example.com": {
+			LastUpdated: now.Add(-4 * time.Second),
+			Provider:    provider1,
+			Error:       "",
+			Endpoints: []healthcheck.DomainStatusEndpoint{
+				{Name: "tunnel", IP: "5385b994-4f7e-4a1c-877b-735fa8f8486e.cfargotunnel.com", Type: "CNAME", Proxied: true, Healthy: true, Priority: 0, Active: true},
+				{Name: "vps-us", IP: "40.160.95.84", Type: "A", Healthy: true, Priority: 1},
+				{Name: "vps-eu", IP: "94.130.99.118", Type: "A", Healthy: true, Priority: 1},
+			},
+		},
 		"failover.example": {
 			LastUpdated: now.Add(-3 * time.Second),
 			Provider:    provider1,
 			Error:       "",
 			Endpoints: []healthcheck.DomainStatusEndpoint{
-				{IP: "4.4.1.1", Type: "A", Healthy: false, Priority: 0, FailureCount: 4},
-				{IP: "4.4.2.2", Type: "A", Healthy: false, Priority: 0, FailureCount: 9},
-				{IP: "tunnel.example.com", Type: "CNAME", Proxied: true, Healthy: true, Priority: 1, Active: true},
+				{Name: "vps-us", IP: "4.4.1.1", Type: "A", Healthy: false, Priority: 0, FailureCount: 4},
+				{Name: "vps-eu", IP: "4.4.2.2", Type: "A", Healthy: false, Priority: 0, FailureCount: 9},
+				{Name: "tunnel", IP: "5385b994-4f7e-4a1c-877b-735fa8f8486e.cfargotunnel.com", Type: "CNAME", Proxied: true, Healthy: true, Priority: 1, Active: true},
+			},
+		},
+		"home.example.com": {
+			LastUpdated: now.Add(-6 * time.Second),
+			Provider:    provider2,
+			Error:       "",
+			Endpoints: []healthcheck.DomainStatusEndpoint{
+				{Name: "home", IP: "203.0.113.45", Type: "A", Healthy: true, Active: true},
 			},
 		},
 		"emptyendpoints.test": {

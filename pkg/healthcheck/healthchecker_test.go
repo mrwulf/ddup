@@ -863,3 +863,32 @@ func TestDedupeResults(t *testing.T) {
 	assert.Equal(t, "static", out[1].Endpoint.Name)
 	assert.Equal(t, "none", out[2].Endpoint.Name, "results without a target are kept")
 }
+
+func TestStatusEndpointNames(t *testing.T) {
+	named := &config.ConfigEndpoint{Name: "tunnel", URL: "https://t.example.com", CNAME: "tunnel.example.com"}
+	unnamed := &config.ConfigEndpoint{Name: "https://u.example.com", URL: "https://u.example.com", IP: "2.2.2.2"}
+	lookupDefault := &config.ConfigEndpoint{Name: "https://api.ipify.org", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://api.ipify.org?token=secret"}}}
+
+	assert.Equal(t, "tunnel", displayName(named))
+	assert.Empty(t, displayName(unnamed), "a name that is just the URL is not worth showing")
+	assert.Empty(t, displayName(lookupDefault), "a default name derived from the lookup URL is not worth showing")
+	lookupDefault.Name = "home"
+	assert.Equal(t, "home", displayName(lookupDefault))
+
+	hc := &HealthChecker{
+		domainCheckers: map[string]*domainChecker{
+			"example.com": {
+				healthyIPs: []string{"tunnel.example.com", "2.2.2.2"},
+				failedIPs:  map[string]int{},
+				provider:   dns.NewMockProvider(false),
+				checker:    &checker.MockChecker{MaxAttempts: 2},
+				endpoints:  map[string]*config.ConfigEndpoint{"tunnel.example.com": named, "2.2.2.2": unnamed},
+			},
+		},
+	}
+	names := map[string]string{}
+	for _, e := range hc.GetDomainStatus("example.com").Endpoints {
+		names[e.IP] = e.Name
+	}
+	assert.Equal(t, map[string]string{"tunnel.example.com": "tunnel", "2.2.2.2": ""}, names)
+}

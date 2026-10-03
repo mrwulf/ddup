@@ -4,6 +4,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/italypaleale/ddup/pkg/config"
 	"github.com/italypaleale/ddup/pkg/dns"
 )
 
@@ -15,7 +16,9 @@ type DomainStatus struct {
 }
 
 type DomainStatusEndpoint struct {
-	Healthy bool `json:"healthy"`
+	// Name of the endpoint, if it was given one
+	Name    string `json:"name,omitempty"`
+	Healthy bool   `json:"healthy"`
 	// IP address, or CNAME hostname
 	IP string `json:"ip"`
 	// Record type published for the endpoint: A, AAAA or CNAME
@@ -64,6 +67,7 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 		if ep != nil {
 			e.Priority = ep.Priority
 			e.Proxied = ep.Proxied
+			e.Name = displayName(ep)
 		}
 		return e
 	}
@@ -84,5 +88,17 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 		Provider:    dc.provider.Name(),
 		Error:       lastError,
 		Endpoints:   endpoints,
+	}
+}
+
+// displayName returns the name of the endpoint, or an empty string if it's just the default (derived from its URL), which is not worth showing
+func displayName(ep *config.ConfigEndpoint) string {
+	switch {
+	case ep.Name == ep.URL:
+		return ""
+	case ep.Dynamic() && ep.URL == "" && ep.Name == config.RedactURL(ep.IPLookup.URLs[0]):
+		return ""
+	default:
+		return ep.Name
 	}
 }

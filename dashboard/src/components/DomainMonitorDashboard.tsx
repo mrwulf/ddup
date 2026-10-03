@@ -2,10 +2,27 @@ import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/ui/card'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
-import { RefreshCw, Activity, AlertTriangle, CheckCircle, XCircle, Clock, Search, Play } from 'lucide-react'
+import {
+  RefreshCw,
+  Activity,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Search,
+  Play,
+  Link2,
+  Cloud,
+  Layers,
+  Radio,
+  CirclePause,
+  type LucideIcon,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface DomainStatusEndpoint {
+  // Name of the endpoint, if it has one
+  name?: string
   healthy: boolean
   // IP address, or CNAME hostname
   ip: string
@@ -30,6 +47,143 @@ type DomainsResponse = Record<string, DomainStatus>
 
 // True if the endpoints have more than one priority, so it matters which of them are published
 const hasTiers = (status: DomainStatus): boolean => new Set(status.endpoints.map((e) => e.priority ?? 0)).size > 1
+
+// Shortens long values (like tunnel hostnames) in the middle, so the end, which says what kind of host it is, stays visible
+const shortenMiddle = (value: string, max = 26): string => {
+  if (value.length <= max) {
+    return value
+  }
+  const tail = Math.min(17, Math.ceil((max - 1) * 0.65))
+  const head = max - 1 - tail
+  return `${value.slice(0, head)}…${value.slice(value.length - tail)}`
+}
+
+// Orders endpoints by priority, then the ones published in DNS first, then healthy ones, then by name
+const sortEndpoints = (endpoints: DomainStatusEndpoint[]): DomainStatusEndpoint[] =>
+  [...endpoints].sort(
+    (a, b) =>
+      (a.priority ?? 0) - (b.priority ?? 0) ||
+      Number(!!b.active) - Number(!!a.active) ||
+      Number(b.healthy) - Number(a.healthy) ||
+      (a.name ?? a.ip).localeCompare(b.name ?? b.ip)
+  )
+
+// A small icon (with an optional label) that explains itself on hover; all share the same style so they read as one set
+const Chip = ({
+  icon: Icon,
+  label,
+  title,
+  className,
+}: {
+  icon: LucideIcon
+  label?: string
+  title: string
+  className?: string
+}) => (
+  <span
+    title={title}
+    className={cn(
+      'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs font-medium text-muted-foreground',
+      className
+    )}
+  >
+    <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+    {label && <span>{label}</span>}
+    <span className="sr-only">{title}</span>
+  </span>
+)
+
+// Explains the icons used on the endpoints
+const Legend = () => (
+  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+    <span className="inline-flex items-center gap-1.5">
+      <Chip icon={Link2} title="CNAME record" /> CNAME record
+    </span>
+    <span className="inline-flex items-center gap-1.5">
+      <Chip icon={Cloud} title="Proxied by Cloudflare" className="text-orange-600 dark:text-orange-400" /> Proxied by
+      Cloudflare
+    </span>
+    <span className="inline-flex items-center gap-1.5">
+      <Chip icon={Layers} label="n" title="Priority" /> Priority n (lower is preferred)
+    </span>
+    <span className="inline-flex items-center gap-1.5">
+      <Chip
+        icon={Radio}
+        title="Published in DNS"
+        className="border-green-600/40 text-green-600 dark:border-green-400/40 dark:text-green-400"
+      />{' '}
+      Published in DNS
+    </span>
+    <span className="inline-flex items-center gap-1.5">
+      <Chip icon={CirclePause} title="Healthy, on standby" /> Healthy, on standby
+    </span>
+    <span className="inline-flex items-center gap-1.5">
+      <Chip icon={AlertTriangle} label="n" title="Failed checks" className="text-yellow-700 dark:text-yellow-400" />{' '}
+      Consecutive failed checks
+    </span>
+  </div>
+)
+
+const EndpointRow = ({ endpoint, tiered }: { endpoint: DomainStatusEndpoint; tiered: boolean }) => {
+  const StatusIcon = endpoint.healthy ? CheckCircle : XCircle
+  const failures = endpoint.failureCount ?? 0
+  // The name is the main label when there is one, and the address is secondary
+  const primary = endpoint.name || endpoint.ip
+  const showTarget = !!endpoint.name
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border p-2">
+      <div className="flex min-w-0 grow basis-48 items-center gap-2">
+        <StatusIcon
+          className={cn(
+            'h-5 w-5 shrink-0',
+            endpoint.healthy ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+          )}
+          aria-label={endpoint.healthy ? 'Healthy' : 'Unhealthy'}
+        />
+        <div className="min-w-0">
+          <div className={cn('truncate text-sm', showTarget ? 'font-medium' : 'font-mono')} title={primary}>
+            {primary}
+          </div>
+          {showTarget && (
+            <div className="truncate font-mono text-xs text-muted-foreground" title={endpoint.ip}>
+              {shortenMiddle(endpoint.ip)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+        {endpoint.type === 'CNAME' && <Chip icon={Link2} title="CNAME record" />}
+        {endpoint.proxied && (
+          <Chip icon={Cloud} title="Proxied by Cloudflare" className="text-orange-600 dark:text-orange-400" />
+        )}
+        {tiered && (
+          <Chip icon={Layers} label={String(endpoint.priority ?? 0)} title={`Priority ${endpoint.priority ?? 0}`} />
+        )}
+        {tiered && endpoint.healthy && (
+          <Chip
+            icon={endpoint.active ? Radio : CirclePause}
+            title={endpoint.active ? 'Published in DNS' : 'Healthy, on standby'}
+            className={
+              endpoint.active
+                ? 'border-green-600/40 text-green-600 dark:border-green-400/40 dark:text-green-400'
+                : undefined
+            }
+          />
+        )}
+        {failures > 0 && (
+          <Chip
+            icon={AlertTriangle}
+            label={String(failures)}
+            title={`${failures} consecutive failed ${failures === 1 ? 'check' : 'checks'}`}
+            className="text-yellow-700 dark:text-yellow-400"
+          />
+        )}
+      </div>
+    </div>
+  )
+}
 
 type Domain = {
   name: string
@@ -188,7 +342,10 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
   const filteredDomains = domains.filter((domain) => {
     const searchLower = searchTerm.toLowerCase()
     const domainMatches = domain.name.toLowerCase().includes(searchLower)
-    const endpointMatches = domain.status.endpoints.some((endpoint) => endpoint.ip.toLowerCase().includes(searchLower))
+    const endpointMatches = domain.status.endpoints.some(
+      (endpoint) =>
+        endpoint.ip.toLowerCase().includes(searchLower) || (endpoint.name ?? '').toLowerCase().includes(searchLower)
+    )
     return domainMatches || endpointMatches
   })
 
@@ -213,7 +370,7 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
               </div>
             )}
 
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 variant={autoRefresh ? 'default' : 'outline'}
                 size="sm"
@@ -255,7 +412,7 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search domains or IP addresses..."
+            placeholder="Search domains, endpoints or IP addresses..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full rounded-md border border-input bg-background px-10 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -367,46 +524,12 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
                       <div>
                         <h4 className="mb-2 text-sm font-medium">Endpoints ({domain.status.endpoints.length})</h4>
                         <div className="space-y-2">
-                          {domain.status.endpoints.map((endpoint, index) => (
-                            <div key={index} className="flex items-center justify-between rounded-lg border p-2">
-                              <div className="flex items-center gap-2">
-                                <Badge
-                                  variant={endpoint.healthy ? 'default' : 'destructive'}
-                                  className={cn(
-                                    'text-xs',
-                                    endpoint.healthy && 'bg-green-100 text-green-800 hover:bg-green-100',
-                                    !endpoint.healthy && 'bg-red-100 text-red-800 hover:bg-red-100'
-                                  )}
-                                >
-                                  {endpoint.healthy ? (
-                                    <CheckCircle className="h-3 w-3" />
-                                  ) : (
-                                    <XCircle className="h-3 w-3" />
-                                  )}
-                                  {endpoint.healthy ? 'Healthy' : 'Unhealthy'}
-                                </Badge>
-                                <span className="font-mono text-sm">{endpoint.ip}</span>
-                                {endpoint.type === 'CNAME' && (
-                                  <Badge variant="outline" className="text-xs">
-                                    CNAME
-                                  </Badge>
-                                )}
-                                {endpoint.proxied && (
-                                  <Badge variant="outline" className="text-xs">
-                                    Proxied
-                                  </Badge>
-                                )}
-                              </div>
-                              <div className="text-right text-xs text-muted-foreground">
-                                {hasTiers(domain.status) && (
-                                  <div>
-                                    Priority {endpoint.priority ?? 0}
-                                    {endpoint.healthy && (endpoint.active ? ' · in DNS' : ' · standby')}
-                                  </div>
-                                )}
-                                <div>Failures: {endpoint.failureCount || '0'}</div>
-                              </div>
-                            </div>
+                          {sortEndpoints(domain.status.endpoints).map((endpoint) => (
+                            <EndpointRow
+                              key={`${endpoint.name ?? ''}|${endpoint.ip}`}
+                              endpoint={endpoint}
+                              tiered={hasTiers(domain.status)}
+                            />
                           ))}
                         </div>
                       </div>
@@ -419,6 +542,8 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
         )}
 
         {/* No Results Message */}
+        {!error && domains.length > 0 && <Legend />}
+
         {filteredDomains.length === 0 && searchTerm && !isLoading && (
           <div className="text-center py-8">
             <p className="text-muted-foreground">No domains or endpoints found matching "{searchTerm}"</p>

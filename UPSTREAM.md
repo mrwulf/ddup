@@ -3,48 +3,53 @@
 This file is specific to this fork: it tracks what has been, and still has to be, submitted to
 [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup). It must not be part of any upstream PR.
 
-Last reviewed: 2026-10-03. Upstream `main` is `1499afb` (it includes #6, squashed, and #16).
-This fork's `main` has diverged because of that squash, so **always branch from `upstream/main` and
-cherry-pick the listed commits**; never open a PR from this fork's `main`.
+Last reviewed: 2026-10-03. Upstream `main` is `7bfcb68` (it includes #6, #9, #15 and #16, all squashed).
+This fork's `main` records upstream as merged (`git merge -s ours`), because upstream squashes and the histories
+differ. **Always branch from `upstream/main` and apply the listed changes**; never open a PR from this fork's
+`main`. When upstream moves, port what the maintainer changed by hand (they push their own commits onto our PR
+branches: check `git log upstream/main` and the PR branches), then record the merge again with `-s ours`.
 
-## What happened to the PRs already sent
+## Upstream PRs
 
-| Upstream PR | What | Status | Notes |
-| :---------- | :--- | :----- | :---- |
-| #6          | Health check `method`, `expectStatus`, `recoverAfter`, transport race fix | **Merged** | `75587c4` on the `pr/1-*` branch |
-| #16         | Document the Cloudflare token permissions | **Merged** | |
-| #9          | "Check now" button and `POST /api/check` | Open | Maintainer LGTM'd `d1430d0`, waiting to merge because of dependencies |
-| #7          | Webhooks (`dns_updated`, `dns_update_failed`, `all_unhealthy`) | Closed by us, to split the stack | **Rework needed:** the maintainer asked to use `github.com/italypaleale/go-kit/webhook` for webhooks and `go-kit/emailer` for email, instead of our own notifier |
-| #8          | `!env` / `!file` secret references | **Declined** | Env vars are less secure than a config file; file references are unnecessary complexity. Fork-only, don't resubmit |
-| #10         | Failover priorities and CNAME/proxied targets | Closed by us, to split the stack | Maintainer: split CNAME support out. It was discussed and rejected in upstream issue #3; discuss it there first. Priorities and `proxied` could go on their own |
-| #11         | `ipLookup` for dynamic DNS | Closed by us, to split the stack | Maintainer asked for the use case (answered: replacing a DDNS script, since ddup already has the credentials and the DNS update logic) |
-| #12         | Docs for webhooks, token permissions, email examples | Closed by us, to split the stack | Resubmit with the feature each section documents |
-| #13         | `ipLookup` fixes (shared address published once, URL secrets redacted) | Closed by us, to split the stack | Goes with `ipLookup` |
+| Upstream PR | What | Status |
+| :---------- | :--- | :----- |
+| #6          | Health check `method`, `expectStatus`, `recoverAfter`, transport race fix | **Merged** (maintainer simplified `expectStatus` to one code or `2xx`; the fork has the same) |
+| #16         | Document the Cloudflare token permissions | **Merged** |
+| #9          | "Check now" button and `POST /api/check` | **Merged** (maintainer reworked the header into a split auto-refresh button; ported to the fork) |
+| #15         | `UpdateRecords` reports whether anything changed | **Merged** |
+| #17         | Cache headers: stop caching the page and icon for 24h | Open |
+| #18         | Overall status in the tab icon | Open (the icon design is a placeholder) |
+| #19         | Domain health counts as compact pills | Open |
+| #20         | Light/dark/system theme switcher | Open |
+| #8          | `!env` / `!file` secret references | **Declined** by the maintainer. Fork-only, don't resubmit (branch `pr/3-secret-refs` is a standalone commit if you want to argue for it) |
+| #7, #10, #11, #12, #13, #14 | The old stacked PRs | Closed by us, to keep reviews small. Replaced by the branches below |
 
-## Clean sources for the remaining work
+## Queued work (branches on this fork, in dependency order, not yet PRs)
 
-The branches `pr/1-*` to `pr/8-*` on this fork hold one clean commit per feature (the old stack). Prefer
-them to the commits on `main`, which also contain lint fixes and merges:
+Open each one only when the one before it has merged, then rebase it onto `upstream/main`. They still sit on
+the old copies of #6, #9 and #15, so expect to drop those commits when rebasing.
 
-| Branch | Commit | Feature |
-| :----- | :----- | :------ |
-| `pr/2-webhooks` | `ca8b991` | Webhooks (rework on go-kit/webhook first) |
-| `pr/3-secret-refs` | `95faa69` | `!env` / `!file` (declined, fork-only) |
-| `pr/4-check-now` | `d1430d0` | Check now (PR #9) |
-| `pr/5-tiers-typed-targets` | `df7aa86` | Priorities, CNAME, proxied |
-| `pr/6-ip-lookup` | `b814d0a` | `ipLookup` |
-| `pr/7-docs` | `77443d9` | Docs |
-| `pr/8-iplookup-fixes` | `775c37f`, `96ac4cb` | `ipLookup` fixes |
+| Branch | Feature | Notes |
+| :----- | :------ | :---- |
+| `chain/1-webhooks` | Webhooks (`dns_updated`, `dns_update_failed`, `all_unhealthy`) | **Open question:** the maintainer asked to use `go-kit/webhook` and `go-kit/emailer`. go-kit's client has no custom method, templated body/headers, retry or timeout settings, and blocks LAN destinations (no way to allow them), so using it would drop features. Either contribute those to go-kit first or defend the notifier |
+| `chain/2-proxied-targets` | `proxied` Cloudflare records and typed DNS targets | The token docs say records are created DNS-only; update that sentence in this PR |
+| `chain/3-priorities` | Failover priorities | Maintainer said priorities and `proxied` could go on their own |
+| `chain/4-cname` | CNAME targets | Discuss in upstream issue #3 first: it was rejected there |
+| `chain/5-iplookup` | `ipLookup` for dynamic DNS | Use case answered (replaces a DDNS script: ddup already has the credentials and the DNS update logic). Includes the shared-address and URL-redaction fixes |
 
-## Changes made after those PRs (not covered by any branch above)
+## Changes on `main` not covered by the above
 
 | Commit on `main` | What | Depends on / notes |
 | :--------------- | :--- | :----------------- |
-| `b6b0392` | Dashboard: endpoint rows with names, and icons for CNAME, proxied, priority, active/standby and failures; legend; endpoints ordered by priority; the status API includes the endpoint name | Needs the status fields from the priorities work (`priority`, `active`, `type`, `proxied`). The CNAME icon only matters if CNAME support lands; the rest is useful with priorities alone |
-| `9e6604d` | Dashboard: the healthy/warning/unhealthy counts are compact pills on the search row instead of three large cards, so less scrolling, especially on phones | Standalone; applies to upstream's dashboard as it is today |
-| `37b18db` | Dashboard: overall status in the tab icon (a "d" with a green/yellow/red badge; the title is unchanged) | Standalone. **Contains a separate bug fix worth its own PR:** the page and icon were cached for 24h, so browsers showed the old dashboard after an upgrade (now `no-cache`, with long caching only for hashed `/assets`; `pkg/server/static.go`) |
-| `76f9366` | Dashboard: light/dark/system theme switcher (icon button in the header; dark mode becomes class-based, with a no-flash script in `index.html`) | Standalone. Upstream's dashboard follows the system setting only |
-| `bcc2293` | Webhook events carry the domain's health `status` (healthy, warning, unhealthy) with `.StatusTag` (ntfy green/yellow/red circle tags) and `.StatusEmoji`; the sample ntfy webhook sets the tag and a higher priority when unhealthy | Depends on webhooks. Redo it on top of go-kit/webhook when that rework happens |
+| `b6b0392` | Dashboard: endpoint rows with names and icons for CNAME, proxied, priority, active/standby and failures; legend; endpoints ordered by priority; the status API includes the endpoint name | Needs `chain/3-priorities` (and `chain/2`); the CNAME icon only matters with `chain/4` |
+| `bcc2293` | Webhook events carry the domain's health `status` with `.StatusTag` and `.StatusEmoji`; the sample ntfy webhook sets the tag and a higher priority when unhealthy | Needs webhooks |
+
+## Maintainer conventions seen in review
+
+- `UpdateRecords`-style functions use named results; blank line before `result.Changed = true`.
+- Tests use `require.ErrorContains` rather than `assert.Contains(err.Error(), ...)`.
+- golangci-lint is pinned in `.github/workflows/ci.yaml` (v2.14.0 at the time of writing); run that version.
+- One focused PR each; keep new config options minimal (the maintainer pushed back on lists, ranges and extra knobs).
 
 ## Fork-only on purpose
 

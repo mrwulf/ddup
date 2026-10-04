@@ -263,7 +263,6 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 					event.Previous = res.Previous
 					hc.notifier.Notify(ctx, event)
 				} else {
-					// For example on startup, when DNS already reflects the healthy endpoints
 					domainLog.InfoContext(ctx, "DNS records already up to date", "targets", event.Published, "priority", newPub.priority)
 				}
 			} else {

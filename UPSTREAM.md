@@ -44,6 +44,7 @@ the old copies of #6, #9 and #15, so expect to drop those commits when rebasing.
 | :--------------- | :--- | :----------------- |
 | `b6b0392` | Dashboard: endpoint rows with names and icons for CNAME, proxied, priority, active/standby and failures; legend; endpoints ordered by priority; the status API includes the endpoint name | Needs `chain/3-priorities` (and `chain/2`); the CNAME icon only matters with `chain/4` |
 | `bcc2293` | Webhook events carry the domain's health `status` with `.StatusTag` and `.StatusEmoji`; the sample ntfy webhook sets the tag and a higher priority when unhealthy | Needs webhooks |
+| (this commit) | Webhook titles (`.Subject`) name the published endpoints (`tunnel`, `vps-eu`) instead of their addresses, falling back to the address for unknown targets | Needs webhooks. Redo it on top of `chain/1-webhooks` |
 
 ## Maintainer conventions seen in review
 

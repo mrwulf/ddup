@@ -183,3 +183,37 @@ func TestSampleConfigWebhooksRender(t *testing.T) {
 	assert.Equal(t, "green_circle", headers["Tags"])
 	assert.Equal(t, "default", headers["Priority"])
 }
+
+func TestEvent_SubjectUsesEndpointNames(t *testing.T) {
+	endpoints := []EndpointState{
+		{Name: "vps-us", IP: "192.0.2.1", Healthy: true},
+		{Name: "vps-eu", IP: "192.0.2.2", Healthy: true},
+		{Name: "tunnel", IP: "abc.cfargotunnel.com", Healthy: true},
+		{Name: "", IP: "192.0.2.9", Healthy: true},
+	}
+
+	tests := []struct {
+		name  string
+		event Event
+		want  string
+	}{
+		{name: "published endpoints, in order", event: Event{Published: []string{"192.0.2.2", "192.0.2.1"}, Endpoints: endpoints}, want: "a.example.com now points to vps-eu, vps-us"},
+		{name: "a hostname target", event: Event{Published: []string{"abc.cfargotunnel.com"}, Endpoints: endpoints}, want: "a.example.com now points to tunnel"},
+		{name: "only the healthy targets without priority information", event: Event{Healthy: []string{"192.0.2.1"}, Endpoints: endpoints}, want: "a.example.com now points to vps-us"},
+		{name: "an unknown target is shown as it is", event: Event{Published: []string{"192.0.2.1", "198.51.100.7"}, Endpoints: endpoints}, want: "a.example.com now points to vps-us, 198.51.100.7"},
+		{name: "an endpoint without a name is shown as its address", event: Event{Published: []string{"192.0.2.9"}, Endpoints: endpoints}, want: "a.example.com now points to 192.0.2.9"},
+		{name: "endpoints that share an address are listed once", event: Event{Published: []string{"192.0.2.1"}, Endpoints: append([]EndpointState{{Name: "first", IP: "192.0.2.1"}}, endpoints...)}, want: "a.example.com now points to first"},
+		{name: "no endpoint information", event: Event{Published: []string{"192.0.2.1"}}, want: "a.example.com now points to 192.0.2.1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.event.Type = EventDNSUpdated
+			tc.event.Domain = "a.example.com"
+			assert.Equal(t, tc.want, tc.event.Subject())
+		})
+	}
+
+	// The other titles don't mention targets
+	assert.Equal(t, "No healthy endpoints for a.example.com", Event{Type: EventAllUnhealthy, Domain: "a.example.com", Endpoints: endpoints}.Subject())
+	assert.Equal(t, "DNS update failed for a.example.com", Event{Type: EventDNSUpdateFailed, Domain: "a.example.com"}.Subject())
+}

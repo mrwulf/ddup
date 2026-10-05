@@ -92,7 +92,7 @@ type EndpointState struct {
 func (e Event) Subject() string {
 	switch e.Type {
 	case EventDNSUpdated:
-		return fmt.Sprintf("%s now points to %s", e.Domain, strings.Join(e.targets(), ", "))
+		return fmt.Sprintf("%s now points to %s", e.Domain, strings.Join(e.targetNames(), ", "))
 	case EventDNSUpdateFailed:
 		return "DNS update failed for " + e.Domain
 	case EventAllUnhealthy:
@@ -148,6 +148,33 @@ func (e Event) targets() []string {
 		return e.Published
 	}
 	return e.Healthy
+}
+
+// targetNames returns the names of the endpoints that are published in DNS, which read better than their addresses (a tunnel
+// hostname, or an IP address that could be anywhere)
+// A target that isn't a known endpoint, or an endpoint without a name, is shown as it is
+func (e Event) targetNames() []string {
+	names := make(map[string]string, len(e.Endpoints))
+	for _, ep := range e.Endpoints {
+		_, ok := names[ep.IP]
+		if !ok && ep.Name != "" {
+			names[ep.IP] = ep.Name
+		}
+	}
+
+	targets := e.targets()
+	res := make([]string, 0, len(targets))
+	for _, target := range targets {
+		name, ok := names[target]
+		if !ok {
+			name = target
+		}
+		// Endpoints can share an address, for example two lookup services that find the same IP
+		if !slices.Contains(res, name) {
+			res = append(res, name)
+		}
+	}
+	return res
 }
 
 // Text returns a plain-text multi-line description of the event, useful as the body of an email or chat message

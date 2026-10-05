@@ -767,7 +767,7 @@ func TestHealthChecker_TierChangeEvent(t *testing.T) {
 	assert.Equal(t, []string{"tunnel.example.com"}, ev.Published)
 	assert.Equal(t, 1, ev.Tier)
 	assert.Equal(t, 0, ev.PreviousTier)
-	assert.Contains(t, ev.Subject(), "now points to tunnel.example.com")
+	assert.Equal(t, "example.com now points to tunnel", ev.Subject(), "the title shows the name of the endpoint, not its address")
 	assert.Contains(t, ev.Text(), "Priority: 1 (was 0)")
 }
 

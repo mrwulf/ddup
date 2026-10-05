@@ -12,6 +12,8 @@ ddup is **not** a DNS server, instead it works with "dynamic" DNS servers. Curre
 
 ![Screenshot of the ddup dashboard, showing the status of domains and their health](screenshot.webp)
 
+This fork adds failover priorities, CNAME and proxied targets, dynamic DNS, webhooks and more: see [FORK.md](FORK.md).
+
 ## Installation
 
 ### Using Docker/Podman

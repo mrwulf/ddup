@@ -251,7 +251,8 @@ To get the credentials:
 
 Cloudflare cannot scope a token to a single record, so the token can edit every DNS record in the zone. Use a token dedicated to ddup rather than sharing one with other tools.
 
-ddup does not set the `proxied` flag, so the records it creates are DNS-only (not proxied by Cloudflare).
+Records are DNS-only (not proxied by Cloudflare) unless an endpoint sets `proxied: true`.
+ddup keeps the proxied status of a record in line with the endpoint, and updates an existing record in place if it differs.
 
 Example:
 

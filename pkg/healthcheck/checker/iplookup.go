@@ -32,8 +32,7 @@ type lookupCacheEntry struct {
 	expires time.Time
 }
 
-// lookupClient doesn't keep connections alive: a lookup that reused an old connection would keep reporting the address of the
-// network path that connection was opened on, even after the connection to the internet changes
+// lookupClient doesn't keep connections alive: a lookup that reused an old connection would keep reporting the address of the network path that connection was opened on, even after the connection to the internet changes
 var lookupClient = &http.Client{Transport: lookupTransport()}
 
 func lookupTransport() *http.Transport {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/italypaleale/ddup/pkg/buildinfo"
 	"github.com/italypaleale/ddup/pkg/healthcheck"
 )
 
@@ -107,4 +109,39 @@ func TestStaticCacheControl(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Header().Get("Cache-Control"), "immutable")
 	assert.Contains(t, rec.Header().Get("Cache-Control"), "max-age=31536000")
+}
+
+func TestInfoEndpoint(t *testing.T) {
+	get := func(t *testing.T) buildInfoResponse {
+		t.Helper()
+		s, err := NewServer(NewServerOpts{HealthChecker: &fakeProvider{}})
+		require.NoError(t, err)
+		rec := httptest.NewRecorder()
+		s.handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/info", nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var res buildInfoResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res))
+		return res
+	}
+
+	t.Run("returns the build", func(t *testing.T) {
+		oldVersion, oldID, oldCommit, oldDate := buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate
+		t.Cleanup(func() {
+			buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate = oldVersion, oldID, oldCommit, oldDate
+		})
+		buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate = "0.6.0-fork.16", "0.6.0-fork.16", "3b95f32", "2026-10-05T19:00:00Z"
+
+		assert.Equal(t, buildInfoResponse{Version: "0.6.0-fork.16", BuildID: "0.6.0-fork.16", Commit: "3b95f32", BuildDate: "2026-10-05T19:00:00Z"}, get(t))
+	})
+
+	t.Run("a development build has only the default version", func(t *testing.T) {
+		oldVersion, oldID, oldCommit, oldDate := buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate
+		t.Cleanup(func() {
+			buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate = oldVersion, oldID, oldCommit, oldDate
+		})
+		buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate = "canary", "", "", ""
+
+		assert.Equal(t, buildInfoResponse{Version: "canary"}, get(t))
+	})
 }

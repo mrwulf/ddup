@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -169,4 +170,28 @@ func TestLookupIP_ErrorsDoNotLeakURLSecrets(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "s3cret")
 	assert.Contains(t, err.Error(), srv.URL+"/ip")
+}
+
+func TestLookupIP_NewConnectionEveryLookup(t *testing.T) {
+	lookupCacheTTL = 0
+	t.Cleanup(func() { lookupCacheTTL = lookupCacheTTLDefault })
+
+	var conns atomic.Int32
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("203.0.113.9\n"))
+	}))
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			conns.Add(1)
+		}
+	}
+	srv.Start()
+	defer srv.Close()
+
+	spec := &config.ConfigIPLookup{URLs: []string{srv.URL}}
+	for range 3 {
+		_, err := lookupIP(t.Context(), spec, time.Second)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, int32(3), conns.Load(), "a reused connection would keep reporting the address of the old network path")
 }

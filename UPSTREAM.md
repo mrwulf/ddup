@@ -21,6 +21,7 @@ branches: check `git log upstream/main` and the PR branches), then record the me
 | #18         | Overall status in the tab icon | Open (the icon design is a placeholder) |
 | #19         | Domain health counts as compact pills | Open |
 | #20         | Light/dark/system theme switcher | Open |
+| #21         | Health checks: open a new connection for every check (keep-alive made checks reuse one connection forever) | Open |
 | #8          | `!env` / `!file` secret references | **Declined** by the maintainer. Fork-only, don't resubmit (branch `pr/3-secret-refs` is a standalone commit if you want to argue for it) |
 | #7, #10, #11, #12, #13, #14 | The old stacked PRs | Closed by us, to keep reviews small. Replaced by the branches below |
 
@@ -35,7 +36,7 @@ the old copies of #6, #9 and #15, so expect to drop those commits when rebasing.
 | `chain/2-proxied-targets` | `proxied` Cloudflare records and typed DNS targets | The token docs say records are created DNS-only; update that sentence in this PR |
 | `chain/3-priorities` | Failover priorities | Maintainer said priorities and `proxied` could go on their own |
 | `chain/4-cname` | CNAME targets | Discuss in upstream issue #3 first: it was rejected there |
-| `chain/5-iplookup` | `ipLookup` for dynamic DNS | Use case answered (replaces a DDNS script: ddup already has the credentials and the DNS update logic). Includes the shared-address and URL-redaction fixes |
+| `chain/5-iplookup` | `ipLookup` for dynamic DNS | Use case answered (replaces a DDNS script: ddup already has the credentials and the DNS update logic). Includes the shared-address and URL-redaction fixes. **Add the no-keep-alive lookup client** (`lookupClient`, commit "use a new connection for every lookup" on `main`) when rebasing |
 
 ## Changes on `main` not covered by the above
 

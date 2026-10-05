@@ -32,6 +32,16 @@ type lookupCacheEntry struct {
 	expires time.Time
 }
 
+// lookupClient doesn't keep connections alive: a lookup that reused an old connection would keep reporting the address of the
+// network path that connection was opened on, even after the connection to the internet changes
+var lookupClient = &http.Client{Transport: lookupTransport()}
+
+func lookupTransport() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone() //nolint:forcetypeassert
+	transport.DisableKeepAlives = true
+	return transport
+}
+
 var (
 	lookupCacheLock sync.Mutex
 	lookupCache     = map[string]lookupCacheEntry{}
@@ -80,7 +90,7 @@ func lookupIPFromURL(ctx context.Context, rawURL string, family int, pattern *re
 	}
 	req.Header.Set("User-Agent", "ddup/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := lookupClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", stripURL(err))
 	}

@@ -76,6 +76,7 @@ and re-sign the commits (they are unsigned).
   that touches those fields has to be rewritten with plain strings.
 - The theme switcher (declined upstream, see #20).
 - CNAME targets, until there's agreement on upstream issue #3.
+- `FORK.md`, its `screenshots/` (sample data only), and the README's screenshots and link to `FORK.md` (the README image replaced upstream's `screenshot.webp`, which this fork deleted). Keep them out of upstream PRs.
 - Release tags (`v0.6.0-fork.N`) and everything that publishes the fork's container image.
 
 ## Before opening a PR

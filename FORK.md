@@ -35,9 +35,13 @@ The last button cycles the theme between system, light and dark.
 
 ### Tab icon
 
-The icon of the browser tab carries the overall status (all healthy, some warnings, or something unhealthy), so a pinned tab is enough to watch.
+The icon of the browser tab carries the overall status: a green badge when everything is healthy, yellow when something has a warning, and red when something is unhealthy.
+With many tabs open the page title is cut off, but the icon still shows whether anything needs attention.
+These are screenshots of a real Chrome window with seven tabs.
 
-![The tab icon when everything is healthy, with warnings, and unhealthy](screenshots/tab-icons.webp)
+![The ddup tab among other tabs in Chrome, in each status](screenshots/tab-states.webp)
+
+![The whole browser window, with the ddup tab showing the warning badge](screenshots/tab-in-browser.webp)
 
 ## Not visible in the dashboard
 

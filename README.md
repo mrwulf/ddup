@@ -17,13 +17,12 @@ ddup is **not** a DNS server, instead it works with "dynamic" DNS servers. Curre
 
 The dashboard shows each endpoint's priority and whether it is published in DNS or on standby, CNAME and proxied targets, dynamic DNS records, failed check counts and errors.
 It has a **Check now** button, auto-refresh controls, summary counts, and a light, dark or system theme.
-The browser tab icon shows the overall status.
+The browser tab icon shows the overall status, so it stays visible when many tabs are open and the title is cut off.
 All the data in these images is sample data.
 
-<p>
-  <img src="screenshots/auto-refresh-menu.webp" alt="The auto-refresh menu" width="49%">
-  <img src="screenshots/tab-icons.webp" alt="The tab icon when healthy, with warnings, and unhealthy" width="49%">
-</p>
+![The ddup tab among other tabs in Chrome, with a green, yellow and red badge on its icon for healthy, warning and unhealthy](screenshots/tab-states.webp)
+
+<img src="screenshots/auto-refresh-menu.webp" alt="The auto-refresh menu" width="60%">
 
 This fork adds failover priorities, CNAME and proxied targets, dynamic DNS, webhooks and more: see [FORK.md](FORK.md) for each of them, and for the phone layout.
 

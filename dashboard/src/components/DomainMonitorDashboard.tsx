@@ -205,7 +205,8 @@ const EndpointRow = ({ endpoint, tiered }: { endpoint: DomainStatusEndpoint; tie
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+      {/* Always on the right: next to the name when it fits, and on its own line, still on the right, when it does not */}
+      <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5">
         {endpoint.type === 'CNAME' && <Chip icon={Link2} title="CNAME record" />}
         {endpoint.proxied && (
           <Chip icon={Cloud} title="Proxied by Cloudflare" className="text-orange-600 dark:text-orange-400" />

@@ -155,6 +155,7 @@ func main() {
 	if cfg.Server.Enabled {
 		srv, err := server.NewServer(server.NewServerOpts{
 			HealthChecker: statusProvider,
+			Elector:       elector,
 		})
 		if err != nil {
 			shutdowns.Run(log)

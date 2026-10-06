@@ -127,6 +127,17 @@ webhooks:
   - name: "audit"
     url: "https://hooks.example.com/ddup"
 
+# Run more than one replica (Kubernetes only). All replicas check health, but only the leader updates DNS and sends webhooks.
+# A Lease named "name" decides the leader. Standby replicas forward API requests to the leader, so the dashboard shows the leader's view.
+# Forwarding needs the identity to be the pod's IP address: set POD_IP from the downward API (status.podIP).
+# Namespace defaults to the pod's, identity to $POD_IP, then $POD_NAME, then the hostname.
+# The pod's service account needs get, create and update on the Lease.
+leaderElection:
+  enabled: false
+  name: ddup
+  # namespace: ""
+  # identity: ""
+
 # Enable the web server
 server:
   enabled: true

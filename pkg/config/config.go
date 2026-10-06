@@ -286,7 +286,8 @@ type ConfigLeaderElection struct {
 	// +default "ddup"
 	Name string `yaml:"name"`
 
-	// Unique ID of this replica; defaults to $POD_NAME, then the hostname
+	// Unique ID of this replica; defaults to $POD_IP, then $POD_NAME, then the hostname
+	// Standby replicas forward API requests to the leader, which needs the identity to be the pod's IP address
 	Identity string `yaml:"identity"`
 
 	// How long a lease is valid without renewal; this bounds failover time

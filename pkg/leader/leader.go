@@ -12,6 +12,8 @@ type Elector interface {
 	// IsLeader returns true while this instance holds leadership
 	// It's cheap and safe to call from any goroutine
 	IsLeader() bool
+	// Leader returns the identity of the current leader, or an empty string if it's unknown or there's no election
+	Leader() string
 }
 
 // Always is the Elector used when leader election is disabled: a single instance is always the leader
@@ -23,3 +25,5 @@ func (Always) Run(ctx context.Context) error {
 }
 
 func (Always) IsLeader() bool { return true }
+
+func (Always) Leader() string { return "" }

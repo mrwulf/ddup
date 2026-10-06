@@ -49,6 +49,7 @@ func TestKubeDefaults(t *testing.T) {
 	t.Cleanup(func(old string) func() { return func() { namespaceFile = old } }(namespaceFile))
 	namespaceFile = nsFile
 	t.Setenv("POD_NAME", "ddup-abc")
+	t.Setenv("POD_IP", "10.244.0.18")
 
 	client := fake.NewSimpleClientset()
 	e, err := NewKube(KubeOpts{
@@ -61,7 +62,8 @@ func TestKubeDefaults(t *testing.T) {
 
 	lease, err := client.CoordinationV1().Leases("networking").Get(t.Context(), "ddup", metav1.GetOptions{})
 	require.NoError(t, err)
-	assert.Equal(t, "ddup-abc", *lease.Spec.HolderIdentity)
+	assert.Equal(t, "10.244.0.18", *lease.Spec.HolderIdentity, "POD_IP wins over POD_NAME")
+	assert.Equal(t, "10.244.0.18", e.Leader())
 }
 
 func TestKubeNoNamespace(t *testing.T) {

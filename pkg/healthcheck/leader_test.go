@@ -18,6 +18,7 @@ type fakeElector struct{ leader atomic.Bool }
 
 func (*fakeElector) Run(ctx context.Context) error { <-ctx.Done(); return nil }
 func (f *fakeElector) IsLeader() bool              { return f.leader.Load() }
+func (*fakeElector) Leader() string                { return "" }
 
 func TestHealthChecker_OnlyLeaderUpdatesDNS(t *testing.T) {
 	provider := dns.NewMockProvider(false)

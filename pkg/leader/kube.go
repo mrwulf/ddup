@@ -25,7 +25,8 @@ type KubeOpts struct {
 	Name string
 	// Namespace of the Lease object; defaults to the namespace the pod runs in
 	Namespace string
-	// Identity of this instance and must be unique per replica; defaults to $POD_NAME, then the hostname
+	// Identity of this instance and must be unique per replica; defaults to $POD_IP, then $POD_NAME, then the hostname
+	// Standby instances forward API requests to the leader, which only works when the identity is the IP address of the pod
 	Identity      string
 	LeaseDuration time.Duration
 	RenewDeadline time.Duration
@@ -42,6 +43,9 @@ type kubeElector struct {
 // NewKube returns an Elector backed by a coordination.k8s.io Lease, using client-go's leaderelection
 func NewKube(opts KubeOpts) (Elector, error) {
 	var err error
+	if opts.Identity == "" {
+		opts.Identity = os.Getenv("POD_IP")
+	}
 	if opts.Identity == "" {
 		opts.Identity = os.Getenv("POD_NAME")
 	}
@@ -117,3 +121,5 @@ func (k *kubeElector) Run(ctx context.Context) error {
 }
 
 func (k *kubeElector) IsLeader() bool { return k.isLeader.Load() }
+
+func (k *kubeElector) Leader() string { return k.le.GetLeader() }

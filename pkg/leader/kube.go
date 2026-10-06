@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -14,12 +16,16 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
+// Where Kubernetes mounts the namespace of the pod; overridden in tests
+var namespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
 // KubeOpts configures the Kubernetes Lease based elector
 type KubeOpts struct {
-	// Namespace and Name of the Lease object
+	// Name of the Lease object
+	Name string
+	// Namespace of the Lease object; defaults to the namespace the pod runs in
 	Namespace string
-	Name      string
-	// Identity of this instance; must be unique per replica (e.g. the pod name)
+	// Identity of this instance and must be unique per replica; defaults to $POD_NAME, then the hostname
 	Identity      string
 	LeaseDuration time.Duration
 	RenewDeadline time.Duration
@@ -35,9 +41,28 @@ type kubeElector struct {
 
 // NewKube returns an Elector backed by a coordination.k8s.io Lease, using client-go's leaderelection
 func NewKube(opts KubeOpts) (Elector, error) {
+	var err error
+	if opts.Identity == "" {
+		opts.Identity = os.Getenv("POD_NAME")
+	}
+	if opts.Identity == "" {
+		opts.Identity, err = os.Hostname()
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine the instance identity: %w", err)
+		}
+	}
+	if opts.Namespace == "" {
+		b, err := os.ReadFile(namespaceFile)
+		if err != nil {
+			return nil, fmt.Errorf("leaderElection.namespace is not set and the pod namespace can't be read: %w", err)
+		}
+		opts.Namespace = strings.TrimSpace(string(b))
+	}
+
 	client := opts.Client
 	if client == nil {
-		rc, err := rest.InClusterConfig()
+		var rc *rest.Config
+		rc, err = rest.InClusterConfig()
 		if err != nil {
 			return nil, fmt.Errorf("leader election needs to run in a cluster: %w", err)
 		}

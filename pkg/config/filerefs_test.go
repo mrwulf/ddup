@@ -32,7 +32,9 @@ providers:
 webhooks:
   - url: !envfile secrets.env HOOK
     headers:
-      Authorization: !file token
+      Authorization: "Bearer {{ .Vars.token }}"
+    vars:
+      token: !file token
 `), 0o600))
 	t.Setenv("DDUP_TEST_CONFIG", cfgPath)
 
@@ -52,5 +54,5 @@ webhooks:
 	assert.Equal(t, "zone-from-env-file", cfg.Providers["p"].Cloudflare.ZoneID)
 	assert.Equal(t, "home.example.com", cfg.Domains[0].RecordName)
 	assert.Equal(t, "https://hooks.example.com/x", cfg.Webhooks[0].URL)
-	assert.Equal(t, "from-file", cfg.Webhooks[0].Headers["Authorization"])
+	assert.Equal(t, "from-file", cfg.Webhooks[0].Vars["token"])
 }

@@ -41,6 +41,12 @@ interface DomainStatusEndpoint {
   // True if published in DNS
   active?: boolean
   failureCount?: number
+  // When the endpoint last changed state (RFC 3339)
+  since?: string
+  // True if `since` is when ddup first checked the endpoint, not a state change
+  sinceStart?: boolean
+  // Last time a check failed (RFC 3339)
+  lastFailure?: string
 }
 
 interface DomainStatus {
@@ -74,6 +80,25 @@ const sortEndpoints = (endpoints: DomainStatusEndpoint[]): DomainStatusEndpoint[
       Number(b.healthy) - Number(a.healthy) ||
       (a.name ?? a.ip).localeCompare(b.name ?? b.ip)
   )
+
+// Formats a timestamp in the browser's locale and time zone
+const formatTime = (value: string): string =>
+  new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })
+
+// Describes since when an endpoint has been healthy or failing, and its last failure if it has recovered
+const statusText = (endpoint: DomainStatusEndpoint): string => {
+  const state = endpoint.healthy ? 'Healthy' : 'Failing'
+  if (!endpoint.since) {
+    return endpoint.healthy ? 'Healthy' : 'Unhealthy'
+  }
+  // For a new endpoint ddup doesn't know when the state started, so it doesn't claim more than it knows
+  const since = formatTime(endpoint.since)
+  let text = endpoint.sinceStart ? `${state} since ddup started (${since})` : `${state} since ${since}`
+  if (endpoint.healthy && endpoint.lastFailure) {
+    text += ` (last failure ${formatTime(endpoint.lastFailure)})`
+  }
+  return text
+}
 
 // A small icon (with an optional label) that explains itself on hover; all share the same style so they read as one set
 const Chip = ({
@@ -182,17 +207,21 @@ const EndpointRow = ({ endpoint, tiered }: { endpoint: DomainStatusEndpoint; tie
   // The name is the main label when there is one, and the address is secondary
   const primary = endpoint.name || endpoint.ip
   const showTarget = !!endpoint.name
+  const status = statusText(endpoint)
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border p-2">
       <div className="flex min-w-0 grow basis-48 items-center gap-2">
-        <StatusIcon
-          className={cn(
-            'h-5 w-5 shrink-0',
-            endpoint.healthy ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-          )}
-          aria-label={endpoint.healthy ? 'Healthy' : 'Unhealthy'}
-        />
+        <span title={status} className="shrink-0">
+          <StatusIcon
+            className={cn(
+              'h-5 w-5',
+              endpoint.healthy ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+            )}
+            aria-hidden="true"
+          />
+          <span className="sr-only">{status}</span>
+        </span>
         <div className="min-w-0">
           <div className={cn('truncate text-sm', showTarget ? 'font-medium' : 'font-mono')} title={primary}>
             {primary}

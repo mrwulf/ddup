@@ -19,6 +19,7 @@ import (
 	"github.com/italypaleale/ddup/pkg/buildinfo"
 	"github.com/italypaleale/ddup/pkg/config"
 	"github.com/italypaleale/ddup/pkg/healthcheck"
+	"github.com/italypaleale/ddup/pkg/leader"
 )
 
 const (
@@ -37,6 +38,10 @@ const (
 type Server struct {
 	hc healthcheck.StatusProvider
 
+	// Optional; may be nil
+	// When set, API requests received by a standby are forwarded to the leader
+	elector leader.Elector
+
 	appSrv  *http.Server
 	handler http.Handler
 	running atomic.Bool
@@ -50,12 +55,15 @@ type Server struct {
 // NewServerOpts contains options for the NewServer method
 type NewServerOpts struct {
 	HealthChecker healthcheck.StatusProvider
+	// Optional; without it, the server always answers requests itself
+	Elector leader.Elector
 }
 
 // NewServer creates a new Server object and initializes it
 func NewServer(opts NewServerOpts) (*Server, error) {
 	s := &Server{
-		hc: opts.HealthChecker,
+		hc:      opts.HealthChecker,
+		elector: opts.Elector,
 	}
 
 	// Init the object
@@ -89,7 +97,9 @@ func (s *Server) initAppServer() (err error) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	mux.HandleFunc("GET /api/status/{recordname}", func(w http.ResponseWriter, r *http.Request) {
+	// API routes are answered by the leader; a standby forwards them
+	api := s.leaderAware(mux)
+	api("GET /api/status/{recordname}", func(w http.ResponseWriter, r *http.Request) {
 		recordName := r.PathValue("recordname")
 		if recordName == "" {
 			errStatusRecordNameEmpty.WriteResponse(r.Context(), w)
@@ -105,12 +115,12 @@ func (s *Server) initAppServer() (err error) {
 		respondWithJSON(r.Context(), w, status)
 	})
 
-	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
+	api("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(r.Context(), w, s.hc.GetAllDomainsStatus())
 	})
 
 	// Version of the running build, shown in the footer of the dashboard
-	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, r *http.Request) {
+	api("GET /api/info", func(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(r.Context(), w, buildInfoResponse{
 			Version:   buildinfo.AppVersion,
 			BuildID:   buildinfo.BuildId,
@@ -119,7 +129,7 @@ func (s *Server) initAppServer() (err error) {
 		})
 	})
 
-	mux.HandleFunc("POST /api/check", func(w http.ResponseWriter, r *http.Request) {
+	api("POST /api/check", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get(headerRequestedBy) != requestedByValue {
 			errCheckForbidden.WriteResponse(r.Context(), w)
 			return

@@ -24,6 +24,10 @@ func (m mockStatusProvider) GetAllDomainsStatus() map[string]healthcheck.DomainS
 		provider3 = "test-provider-3"
 	)
 	now := time.Now()
+	ago := func(d time.Duration) *time.Time {
+		t := now.Add(-d)
+		return &t
+	}
 
 	return map[string]healthcheck.DomainStatus{
 		"example.com": {
@@ -31,9 +35,9 @@ func (m mockStatusProvider) GetAllDomainsStatus() map[string]healthcheck.DomainS
 			Provider:    provider1,
 			Error:       "",
 			Endpoints: []healthcheck.DomainStatusEndpoint{
-				{IP: "1.1.1.1", Healthy: true, FailureCount: 0},
-				{IP: "1.1.2.2", Healthy: false, FailureCount: 101},
-				{IP: "1.1.3.3", Healthy: true, FailureCount: 0},
+				{IP: "1.1.1.1", Healthy: true, FailureCount: 0, Since: ago(3 * time.Hour), SinceStart: true},
+				{IP: "1.1.2.2", Healthy: false, FailureCount: 101, Since: ago(26 * time.Hour), LastFailure: ago(time.Second)},
+				{IP: "1.1.3.3", Healthy: true, FailureCount: 0, Since: ago(20 * time.Minute), LastFailure: ago(47 * time.Minute)},
 			},
 		},
 		"mysite.xyz": {

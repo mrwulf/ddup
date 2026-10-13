@@ -13,6 +13,7 @@ import (
 	"github.com/italypaleale/ddup/pkg/config"
 	"github.com/italypaleale/ddup/pkg/dns"
 	"github.com/italypaleale/ddup/pkg/healthcheck/checker"
+	"github.com/italypaleale/ddup/pkg/leader"
 	appmetrics "github.com/italypaleale/ddup/pkg/metrics"
 	"github.com/italypaleale/ddup/pkg/notify"
 	"github.com/italypaleale/ddup/pkg/utils"
@@ -24,6 +25,10 @@ type HealthChecker struct {
 	domainCheckers map[string]*domainChecker
 	// Optional; may be nil
 	notifier *notify.Notifier
+	// Decides whether this instance may update DNS and send webhooks; checks always run
+	elector leader.Elector
+	// Set while we're a standby, so the cycle where we become leader re-asserts DNS
+	wasStandby bool
 	// Requests to run a check right away; handled by Run, so checks never overlap
 	forceCh chan forceRequest
 }
@@ -40,7 +45,7 @@ type forceRequest struct {
 var ErrNotRunning = errors.New("health checker is not running")
 
 // NewHealthChecker creates a new HealthChecker instance
-func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.AppMetrics, notifier *notify.Notifier) (*HealthChecker, error) {
+func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.AppMetrics, notifier *notify.Notifier, elector leader.Elector) (*HealthChecker, error) {
 	cfg := config.Get()
 
 	dcs := make(map[string]*domainChecker, len(cfg.Domains))
@@ -66,6 +71,7 @@ func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.
 	return &HealthChecker{
 		domainCheckers: dcs,
 		notifier:       notifier,
+		elector:        elector,
 		forceCh:        make(chan forceRequest, 1),
 	}, nil
 }
@@ -129,6 +135,13 @@ func (hc *HealthChecker) ForceCheck(ctx context.Context) error {
 // checkAndUpdateDNS performs health checks and updates DNS if needed
 func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 	var err error
+
+	// Only the leader acts; a standby still tracks state so it's ready to take over
+	isLeader := hc.elector == nil || hc.elector.IsLeader()
+	// On takeover, assume nothing we "published" earlier counts: the old leader may have died mid-change
+	// UpdateRecords is idempotent and reports Changed=false when records are already right, so this costs one no-op call per domain and sends no duplicate webhooks
+	resync := isLeader && hc.wasStandby
+	hc.wasStandby = !isLeader
 
 	for domainName, dc := range hc.domainCheckers {
 		domainLog := slog.With("domain", domainName)
@@ -229,13 +242,18 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		allDown := len(newHealthyIPs) == 0
 		if allDown && !dc.swapAllDown(true) {
 			event.Type = notify.EventAllUnhealthy
-			hc.notifier.Notify(ctx, event)
+			if isLeader {
+				hc.notifier.Notify(ctx, event)
+			}
 		} else if !allDown {
 			dc.swapAllDown(false)
 		}
 
 		// Check if what we publish has changed
-		if !utils.ElementsMatch(prevPub.keys(), newPub.keys()) {
+		if !isLeader {
+			// Standby: keep tracking health below, but leave DNS and webhooks to the leader
+			domainLog.DebugContext(ctx, "Not the leader, skipping DNS update")
+		} else if resync || !utils.ElementsMatch(prevPub.keys(), newPub.keys()) {
 			// Update DNS records
 			if len(newHealthyIPs) > 0 {
 				var res dns.UpdateResult

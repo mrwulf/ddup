@@ -112,19 +112,41 @@ func TestSampleEmailWebhook(t *testing.T) {
 }
 
 func TestNew_DryRunCatchesTemplateErrors(t *testing.T) {
-	_, err := New([]config.ConfigWebhook{{Name: "w", URL: "https://x.example.com", Body: `{{ env "DDUP_TEST_UNSET_VAR" }}`}})
+	// A var that isn't defined is caught at startup
+	_, err := New([]config.ConfigWebhook{{Name: "w", URL: "https://x.example.com", Body: `{{ .Vars.missing }}`}})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "DDUP_TEST_UNSET_VAR is not set")
+	assert.Contains(t, err.Error(), "missing")
+
+	_, err = New([]config.ConfigWebhook{{Name: "w", URL: "https://x.example.com", Headers: map[string]string{"Authorization": "Bearer {{ .Vars.token }}"}}})
+	require.Error(t, err)
 
 	_, err = New([]config.ConfigWebhook{{Name: "w", URL: "https://x.example.com", Body: `{{ .NoSuchField }}`}})
 	require.Error(t, err)
+}
 
-	t.Setenv("DDUP_TEST_SET_VAR", "ops@example.com")
-	n, err := New([]config.ConfigWebhook{{Name: "w", URL: "https://x.example.com", Body: `to={{ env "DDUP_TEST_SET_VAR" }}`}})
+func TestHook_Vars(t *testing.T) {
+	vars := map[string]string{"to": "ops@example.com", "token": "s3cret"}
+	n, err := New([]config.ConfigWebhook{{
+		Name:    "w",
+		URL:     "https://x.example.com",
+		Vars:    vars,
+		Headers: map[string]string{"Authorization": "Bearer {{ .Vars.token }}"},
+		Body:    `{{ .Domain }} to={{ json .Vars.to }}`,
+	}})
 	require.NoError(t, err)
-	body, _, _, err := n.hooks[0].render(Event{})
+
+	body, _, headers, err := n.hooks[0].render(Event{Domain: "a.example.com"})
 	require.NoError(t, err)
-	assert.Equal(t, "to=ops@example.com", string(body))
+	assert.Equal(t, `a.example.com to="ops@example.com"`, string(body))
+	assert.Equal(t, "Bearer s3cret", headers["Authorization"])
+
+	// Without a body template the event is sent as JSON, which must never include the vars
+	n, err = New([]config.ConfigWebhook{{Name: "w", URL: "https://x.example.com", Vars: vars}})
+	require.NoError(t, err)
+	body, _, _, err = n.hooks[0].render(Event{Domain: "a.example.com"})
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), "s3cret")
+	assert.NotContains(t, string(body), "ops@example.com")
 }
 
 func TestStatusAndTags(t *testing.T) {

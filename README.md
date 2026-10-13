@@ -104,7 +104,7 @@ You can find an example of the configuration file, and a description of every op
 
 ### Domains and Endpoints
 
-- `webhooks`: Optional webhooks called on events (see `config.sample.yaml`): `url`, `method`, `headers`, `events` (`dns_updated`, `dns_update_failed`, `all_unhealthy`), `body` (Go template; JSON event if omitted; templates can use `.Status`, `.StatusTag`, `.StatusEmoji`, `.Subject`, `.Text`, `join` and `json`, see the email example), `timeout`, `attempts`. Deliveries are retried with exponential backoff.
+- `webhooks`: Optional webhooks called on events (see `config.sample.yaml`): `url`, `method`, `headers`, `events` (`dns_updated`, `dns_update_failed`, `all_unhealthy`), `vars` (values for the templates, as `.Vars`), `body` (Go template; JSON event if omitted; templates can use `.Status`, `.StatusTag`, `.StatusEmoji`, `.Subject`, `.Text`, `join` and `json`, see the email example), `timeout`, `attempts`. Deliveries are retried with exponential backoff.
 - `domains`: Array of domains to manage
   - `recordName`: The DNS record to update (e.g., "api.example.com"). Can use `!file` and `!envfile` (see [Providers Configuration](#providers-configuration))
   - `provider`: Name of the DNS provider (from the [`providers` map](#providers-configuration))
@@ -177,7 +177,7 @@ domains:
 
 Any string setting (provider settings, webhook `url` and header values, `recordName`) can come from a file, so the config file doesn't need to contain secrets: `apiToken: !file /run/secrets/token`, or `apiToken: !envfile /run/secrets/ddup.env CLOUDFLARE_API_TOKEN` to read one variable from a dotenv file. ddup fails at startup if the file or variable is missing. A value is read whole, so a header such as `Bearer <token>` needs the prefix in the file.
 
-In webhook templates, `{{ env "NAME" }}` reads an environment variable (this fork only).
+Webhook templates can use secrets too: set them in the webhook's `vars` (each one can use `!file` or `!envfile`) and read them as `{{ .Vars.name }}`, for example `Authorization: "Bearer {{ .Vars.token }}"`. A var that a template uses but the webhook doesn't define is an error at startup.
 
 - `providers`: Map of providers.
   - Key: provider name (e.g. `my-provider-1`)

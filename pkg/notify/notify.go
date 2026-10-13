@@ -76,6 +76,13 @@ type Event struct {
 	Error     string          `json:"error,omitempty"`
 }
 
+// templateData is the data available to body and header templates: the event, and the vars of the webhook
+// The vars are not part of Event, so they are never in the JSON body that is sent when there's no template
+type templateData struct {
+	Event
+	Vars map[string]string
+}
+
 // EndpointState is the result of the latest health check for an endpoint
 type EndpointState struct {
 	Name string `json:"name"`
@@ -238,13 +245,13 @@ func New(webhooks []config.ConfigWebhook) (*Notifier, error) {
 		h := &hook{cfg: w, headers: make(map[string]*template.Template, len(w.Headers))}
 		var err error
 		if w.Body != "" {
-			h.body, err = template.New("body").Funcs(config.WebhookTemplateFuncs).Parse(w.Body)
+			h.body, err = template.New("body").Funcs(config.WebhookTemplateFuncs).Option("missingkey=error").Parse(w.Body)
 			if err != nil {
 				return nil, fmt.Errorf("webhook %q: body template: %w", w.Name, err)
 			}
 		}
 		for k, v := range w.Headers {
-			h.headers[k], err = template.New(k).Funcs(config.WebhookTemplateFuncs).Parse(v)
+			h.headers[k], err = template.New(k).Funcs(config.WebhookTemplateFuncs).Option("missingkey=error").Parse(v)
 			if err != nil {
 				return nil, fmt.Errorf("webhook %q: header %q template: %w", w.Name, k, err)
 			}
@@ -337,7 +344,7 @@ func (h *hook) render(ev Event) (body []byte, contentType string, headers map[st
 		contentType = "application/json"
 	} else {
 		var buf bytes.Buffer
-		err = h.body.Execute(&buf, ev)
+		err = h.body.Execute(&buf, templateData{Event: ev, Vars: h.cfg.Vars})
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("executing body template: %w", err)
 		}
@@ -348,7 +355,7 @@ func (h *hook) render(ev Event) (body []byte, contentType string, headers map[st
 	headers = make(map[string]string, len(h.headers))
 	for k, t := range h.headers {
 		var buf bytes.Buffer
-		err = t.Execute(&buf, ev)
+		err = t.Execute(&buf, templateData{Event: ev, Vars: h.cfg.Vars})
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("executing header %q template: %w", k, err)
 		}

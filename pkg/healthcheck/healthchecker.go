@@ -10,13 +10,14 @@ import (
 	"slices"
 	"time"
 
+	"github.com/italypaleale/go-kit/utils"
+
 	"github.com/italypaleale/ddup/pkg/config"
 	"github.com/italypaleale/ddup/pkg/dns"
 	"github.com/italypaleale/ddup/pkg/healthcheck/checker"
 	"github.com/italypaleale/ddup/pkg/leader"
 	appmetrics "github.com/italypaleale/ddup/pkg/metrics"
 	"github.com/italypaleale/ddup/pkg/notify"
-	"github.com/italypaleale/ddup/pkg/utils"
 )
 
 // HealthChecker manages health checking and DNS updates
@@ -259,7 +260,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		case !isLeader:
 			// Standby: keep tracking health below, but leave DNS and webhooks to the leader
 			domainLog.DebugContext(ctx, "Not the leader, skipping DNS update")
-		case resync || !utils.ElementsMatch(prevPub.keys(), newPub.keys()):
+		case resync || !utils.StringSlicesMatch(prevPub.keys(), newPub.keys()):
 			// Update DNS records
 			if len(newHealthyIPs) > 0 {
 				var res dns.UpdateResult

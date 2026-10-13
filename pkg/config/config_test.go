@@ -415,7 +415,7 @@ func TestSampleConfig(t *testing.T) {
 		require.NoError(t, err)
 	}
 	sample = bytes.ReplaceAll(sample, []byte("!file /run/secrets/"), []byte("!file "+secretsDir+"/"))
-	err = os.WriteFile(samplePath, sample, 0o600)
+	err = os.WriteFile(samplePath, sample, 0o600) //nolint:gosec
 	require.NoError(t, err)
 	t.Setenv("DDUP_CONFIG", samplePath)
 

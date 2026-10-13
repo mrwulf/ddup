@@ -426,7 +426,7 @@ func (c *Config) validateLeaderElection() error {
 		le.Type = "kubernetes"
 	}
 	if le.Type != "kubernetes" {
-		return fmt.Errorf("leaderElection.type must be 'kubernetes'")
+		return errors.New("leaderElection.type must be 'kubernetes'")
 	}
 	if le.Name == "" {
 		le.Name = "ddup"
@@ -442,7 +442,7 @@ func (c *Config) validateLeaderElection() error {
 	}
 	// client-go's own constraints
 	if le.LeaseDuration <= le.RenewDeadline || le.RenewDeadline <= le.RetryPeriod {
-		return fmt.Errorf("leaderElection requires leaseDuration > renewDeadline > retryPeriod")
+		return errors.New("leaderElection requires leaseDuration > renewDeadline > retryPeriod")
 	}
 	return nil
 }

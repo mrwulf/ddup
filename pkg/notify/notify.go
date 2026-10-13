@@ -80,6 +80,7 @@ type Event struct {
 // The vars are not part of Event, so they are never in the JSON body that is sent when there's no template
 type templateData struct {
 	Event
+
 	Vars map[string]string
 }
 

@@ -49,6 +49,7 @@ func newSinceFixture(maxAttempts int) *sinceFixture {
 
 // check runs a cycle one minute after the previous one, with the endpoint healthy or not
 func (f *sinceFixture) check(t *testing.T, healthy bool) DomainStatusEndpoint {
+	t.Helper()
 	f.now = f.now.Add(time.Minute)
 	res := checker.Result{Endpoint: f.ep, Healthy: healthy}
 	if !healthy {

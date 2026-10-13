@@ -30,10 +30,10 @@ func TestKubeFailover(t *testing.T) {
 	a, b := newTestElector(t, client, "a"), newTestElector(t, client, "b")
 
 	ctxA, cancelA := context.WithCancel(t.Context())
-	go a.Run(ctxA)
+	go func() { _ = a.Run(ctxA) }()
 	require.Eventually(t, a.IsLeader, 3*time.Second, 50*time.Millisecond)
 
-	go b.Run(t.Context())
+	go func() { _ = b.Run(t.Context()) }()
 	time.Sleep(500 * time.Millisecond)
 	assert.False(t, b.IsLeader(), "only one leader at a time")
 
@@ -57,7 +57,7 @@ func TestKubeDefaults(t *testing.T) {
 		LeaseDuration: 1500 * time.Millisecond, RenewDeadline: time.Second, RetryPeriod: 100 * time.Millisecond,
 	})
 	require.NoError(t, err)
-	go e.Run(t.Context())
+	go func() { _ = e.Run(t.Context()) }()
 	require.Eventually(t, e.IsLeader, 3*time.Second, 50*time.Millisecond)
 
 	lease, err := client.CoordinationV1().Leases("networking").Get(t.Context(), "ddup", metav1.GetOptions{})

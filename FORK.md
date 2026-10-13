@@ -7,7 +7,7 @@ Everything shown below is sample data: `example.com` names, documentation IP add
 
 ## Dashboard
 
-![The dashboard in the dark theme: failover tiers, CNAME and proxied targets, dynamic DNS, a warning, and an error](screenshots/dashboard-dark.webp)
+![The dashboard in the dark theme, with the red cross icon next to the title and the summary bar under the search bar: failover tiers, CNAME and proxied targets, dynamic DNS, a warning, and an error](screenshots/dashboard-dark.webp)
 
 Each endpoint row shows what ddup publishes and why:
 
@@ -19,7 +19,8 @@ Each endpoint row shows what ddup publishes and why:
 
 ### Summary, search and controls
 
-The bar under the search bar counts healthy, warning and unhealthy domains.
+The bar under the search bar has three equal segments that count the healthy, warning and unhealthy domains.
+On a narrow screen the segments show only the icon and the count.
 **Check now** runs all health checks immediately, and the split button controls auto-refresh.
 The last button cycles the theme between system, light and dark.
 
@@ -38,11 +39,12 @@ The last button cycles the theme between system, light and dark.
 The icon of the browser tab carries the overall status as a badge whose shape changes, so it doesn't rely on color alone: a green circle with a check when everything is healthy, a yellow triangle with an exclamation mark when something has a warning, and a red circle with a cross when something is unhealthy (a grey circle with a dash before the first load).
 The dashboard header shows the same icon before the title, and `favicon.svg` is the icon without a badge.
 With many tabs open the page title is cut off, but the icon still shows whether anything needs attention.
-These are screenshots of a real Chrome window with seven tabs.
+These are screenshots of a real Chrome window with seven tabs; the other tabs are neutral sample pages.
+The sample data in the other images has an unhealthy domain, so the header icon there shows the red cross.
 
-![The ddup tab among other tabs in Chrome, in each status](screenshots/tab-states.webp)
+![The ddup tab among other tabs in Chrome, with the green check, the yellow warning triangle and the red cross on its icon](screenshots/tab-states.webp)
 
-![The whole browser window, with the ddup tab showing the warning badge](screenshots/tab-in-browser.webp)
+![The whole browser window, with the ddup tab showing the yellow warning triangle and the same icon in the dashboard header](screenshots/tab-in-browser.webp)
 
 ## Not visible in the dashboard
 
@@ -54,4 +56,5 @@ These are screenshots of a real Chrome window with seven tabs.
 
 The images come from the dashboard's `dashboarddev` mode, which serves static data instead of running health checks (`cmd/ddup/main_dashboarddev.go`).
 To regenerate them, replace the mock data with the example values listed at the top of this page, build with `-tags dashboarddev`, and capture the page with a headless browser. Don't commit that data change.
+The two tab images are captures of a real, non-headless Chrome window pointed at that server, with neutral sample pages in the other tabs; headless Chrome has no tab strip.
 Never take screenshots from a real deployment: they would show real names and addresses.

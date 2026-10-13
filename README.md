@@ -12,15 +12,15 @@ ddup is **not** a DNS server, instead it works with "dynamic" DNS servers. Curre
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="screenshots/dashboard-dark.webp">
-  <img src="screenshots/dashboard-light.webp" alt="Screenshot of the ddup dashboard, showing the status of domains, their endpoints, failover priorities and health">
+  <img src="screenshots/dashboard-light.webp" alt="Screenshot of the ddup dashboard, with the status icon in the header, the summary bar, and the domains with their endpoints, failover priorities and health">
 </picture>
 
 The dashboard shows each endpoint's priority and whether it is published in DNS or on standby, CNAME and proxied targets, dynamic DNS records, failed check counts and errors.
-It has a **Check now** button, auto-refresh controls, summary counts, and a light, dark or system theme.
+It has a **Check now** button, auto-refresh controls, a summary bar, and a light, dark or system theme.
 The browser tab icon shows the overall status, so it stays visible when many tabs are open and the title is cut off.
 All the data in these images is sample data.
 
-![The ddup tab among other tabs in Chrome, with a green, yellow and red badge on its icon for healthy, warning and unhealthy](screenshots/tab-states.webp)
+![The ddup tab among other tabs in Chrome, with a green check, a yellow warning triangle and a red cross on its icon for healthy, warning and unhealthy](screenshots/tab-states.webp)
 
 <img src="screenshots/auto-refresh-menu.webp" alt="The auto-refresh menu" width="60%">
 

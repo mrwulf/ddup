@@ -35,7 +35,8 @@ The last button cycles the theme between system, light and dark.
 
 ### Tab icon
 
-The icon of the browser tab carries the overall status: a green badge when everything is healthy, yellow when something has a warning, and red when something is unhealthy.
+The icon of the browser tab carries the overall status as a badge whose shape changes, so it doesn't rely on color alone: a green circle with a check when everything is healthy, a yellow triangle with an exclamation mark when something has a warning, and a red circle with a cross when something is unhealthy (a grey circle with a dash before the first load).
+The dashboard header shows the same icon before the title, and `favicon.svg` is the icon without a badge.
 With many tabs open the page title is cut off, but the icon still shows whether anything needs attention.
 These are screenshots of a real Chrome window with seven tabs.
 

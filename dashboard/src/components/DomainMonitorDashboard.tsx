@@ -26,6 +26,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useTheme, type Theme } from '@/lib/theme'
 import { faviconDataUrl, setFavicon, type OverallStatus } from '@/lib/favicon'
+import { StatusIcon } from '@/components/StatusIcon'
 
 interface DomainStatusEndpoint {
   // Name of the endpoint, if it has one
@@ -494,7 +495,8 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
       <div className="mx-auto max-w-7xl space-y-6">
         {/* Header */}
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
+          <div className="flex items-center gap-3">
+            <StatusIcon status={overallStatus} className="h-8 w-8 shrink-0" />
             <h1 className="text-3xl font-bold tracking-tight">ddup</h1>
           </div>
 

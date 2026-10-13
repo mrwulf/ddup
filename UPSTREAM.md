@@ -56,9 +56,9 @@ and re-sign the commits (they are unsigned).
 | Branch | Feature | Notes |
 | :----- | :------ | :---- |
 | `chain/1-webhooks` ([#26](https://github.com/ItalyPaleAle/ddup/issues/26), priority 4) | Webhooks (`dns_updated`, `dns_update_failed`, `all_unhealthy`) | **Open question:** the maintainer asked to use `go-kit/webhook` and `go-kit/emailer`. go-kit's client has no custom method, templated body/headers, retry or timeout settings, and blocks LAN destinations (no way to allow them), so using it would drop features. Either contribute those to go-kit first or defend the notifier |
-| `chain/3-priorities` ([#23](https://github.com/ItalyPaleAle/ddup/issues/23), priority 1) | Failover priorities | Required. Maintainer said priorities and `proxied` could go on their own. Branch order is 2 then 3, but the PR order is 3 first |
+| `chain/3-priorities` ([#23](https://github.com/ItalyPaleAle/ddup/issues/23), priority 1) | Failover priorities | Required. **Welcomed by the maintainer** ("This is a good idea!", 2026-10-13). A standalone version on `upstream/main` is upstream PR [#34](https://github.com/ItalyPaleAle/ddup/pull/34) (branch `feat/priorities`, no review yet). The fork's own version stays stacked on typed targets until #34 and the Cloudflare PR land |
 | `chain/2-proxied-targets` and `chain/4-cname` ([#24](https://github.com/ItalyPaleAle/ddup/issues/24), priority 2) | `proxied` Cloudflare records, typed DNS targets, CNAME targets, and the dashboard icons for proxied and CNAME (from `b6b0392`) | Required; one PR after priorities. Update the README sentence about DNS-only records. The CNAME case (Cloudflare Tunnel as a last resort) answers the questions in the closed issue #3 |
-| `feat/leader-election` ([#30](https://github.com/ItalyPaleAle/ddup/issues/30), deployed as fork.18 to fork.20) | Optional Lease-based leader election for several replicas, and standbys forwarding API requests to the leader | Opt-in, off by default. It adds `k8s.io/client-go`; the issue offers a build tag. Not on the fork's `main` until the PR for `chore/retire-secretstring` is merged, which merges this branch |
+| `feat/leader-election` ([#30](https://github.com/ItalyPaleAle/ddup/issues/30), deployed since fork.18) | Optional Lease-based leader election for several replicas, and standbys forwarding API requests to the leader | **Declined 2026-10-13** (closed as not planned): too much complexity to maintain, ddup is not in the critical path (a crash restarts in about a second), and a standby does not replicate state. Fork-only, don't resubmit. The fork keeps it, and the cluster runs two replicas with it |
 | `chain/5-iplookup` ([#25](https://github.com/ItalyPaleAle/ddup/issues/25), priority 3) | `ipLookup` for dynamic DNS | Required. Use case answered (replaces a DDNS script: ddup already has the credentials and the DNS update logic). Includes the shared-address and URL-redaction fixes. **Add the no-keep-alive lookup client** (`lookupClient`, the "use a new connection for every lookup" commit on `main`) when rebasing |
 
 ## Built, waiting for the issue to be agreed
@@ -81,13 +81,15 @@ and re-sign the commits (they are unsigned).
 | `3b95f32` | Dashboard: the endpoint icons stay on the right of the row, also when they wrap to their own line | Belongs with `b6b0392` |
 | `bcc2293` | Webhook events carry the domain's health `status` with `.StatusTag` and `.StatusEmoji`; the sample ntfy webhook sets the tag and a higher priority when unhealthy | Needs webhooks |
 | `0167787` | Webhook titles (`.Subject`) name the published endpoints (`tunnel`, `vps-eu`) instead of their addresses, falling back to the address for unknown targets | Needs webhooks. Redo it on top of `chain/1-webhooks` |
-| `76e475d` | Dashboard footer with the version of the build (`ddup <version> · built <date> · <commit>`), from a new `GET /api/info` | Standalone; issue [#28](https://github.com/ItalyPaleAle/ddup/issues/28) |
+| `76e475d` | Dashboard footer with the version of the build (`ddup <version> · built <date> · <commit>`), from a new `GET /api/info` | Standalone; issue [#28](https://github.com/ItalyPaleAle/ddup/issues/28), **approved by the maintainer** ("Sure!", 2026-10-13). Next: a PR on `upstream/main`, using upstream's `buildinfo` package |
 | `17ed6e5` | IP lookups open a new connection every time (the lookup client has no keep-alives) | Needs `chain/5-iplookup`; goes with it |
 | `76f9366` | Light/dark/system theme switcher | Declined upstream (#20). Fork-only |
 | `37b18db`, `9f8ebfa` | Tab icon with the overall status | Submitted as #18, waiting on the design feedback above |
 | `9e6604d` | Summary pills | Submitted as #19, waiting on the design feedback above |
 
 ## Fork-only on purpose
+
+- Leader election (declined upstream, see #30): `pkg/leader`, the `leaderElection` config, and the standby request forwarding in `pkg/server`. Every fork feature must keep working with it off.
 
 - Webhook `vars` (values for the templates, loaded with upstream's `!file` and `!envfile`), which replaced the fork's `env` template function. Upstream issue [#33](https://github.com/ItalyPaleAle/ddup/issues/33) (needs the webhooks PR first).
 - The theme switcher (declined upstream, see #20).

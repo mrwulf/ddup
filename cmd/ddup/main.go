@@ -9,6 +9,8 @@ import (
 	configkit "github.com/italypaleale/go-kit/config"
 	"github.com/italypaleale/go-kit/observability"
 	"github.com/italypaleale/go-kit/servicerunner"
+	"github.com/italypaleale/go-kit/signals"
+	slogkit "github.com/italypaleale/go-kit/slog"
 
 	"github.com/italypaleale/ddup/pkg/buildinfo"
 	"github.com/italypaleale/ddup/pkg/config"
@@ -18,8 +20,6 @@ import (
 	appmetrics "github.com/italypaleale/ddup/pkg/metrics"
 	"github.com/italypaleale/ddup/pkg/notify"
 	"github.com/italypaleale/ddup/pkg/server"
-	"github.com/italypaleale/ddup/pkg/signals"
-	"github.com/italypaleale/ddup/pkg/utils"
 )
 
 var statusProvider healthcheck.StatusProvider
@@ -41,7 +41,7 @@ func main() {
 		if ok {
 			ce.LogFatal(initLogger)
 		} else {
-			utils.FatalError(initLogger, "Failed to load configuration", err)
+			slogkit.FatalError(initLogger, "Failed to load configuration", err)
 			return
 		}
 	}
@@ -59,7 +59,7 @@ func main() {
 		AppVersion: buildinfo.AppVersion,
 	})
 	if err != nil {
-		utils.FatalError(initLogger, "Failed to create logger", err)
+		slogkit.FatalError(initLogger, "Failed to create logger", err)
 		return
 	}
 	slog.SetDefault(log)
@@ -69,7 +69,7 @@ func main() {
 	err = cfg.Validate(log)
 	if err != nil {
 		shutdowns.Run(log)
-		utils.FatalError(log, "Invalid configuration", err)
+		slogkit.FatalError(log, "Invalid configuration", err)
 		return
 	}
 
@@ -83,7 +83,7 @@ func main() {
 	metrics, metricsShutdownFn, err := appmetrics.NewAppMetrics(ctx)
 	if err != nil {
 		shutdowns.Run(log)
-		utils.FatalError(log, "Failed to init metrics", err)
+		slogkit.FatalError(log, "Failed to init metrics", err)
 		return
 	}
 	shutdowns.Add(metricsShutdownFn)
@@ -95,7 +95,7 @@ func main() {
 		provider, err = dns.NewProvider(name, &pc, metrics)
 		if err != nil {
 			shutdowns.Run(log)
-			utils.FatalError(log, "Failed to init DNS provider '"+name+"'", err)
+			slogkit.FatalError(log, "Failed to init DNS provider '"+name+"'", err)
 			return
 		}
 		dnsProviders[name] = provider
@@ -105,7 +105,7 @@ func main() {
 	notifier, err := notify.New(cfg.Webhooks)
 	if err != nil {
 		shutdowns.Run(log)
-		utils.FatalError(log, "Failed to init webhooks", err)
+		slogkit.FatalError(log, "Failed to init webhooks", err)
 		return
 	}
 	// Give in-flight webhook deliveries a moment to complete on shutdown
@@ -131,7 +131,7 @@ func main() {
 		})
 		if err != nil {
 			shutdowns.Run(log)
-			utils.FatalError(log, "Failed to init leader election", err)
+			slogkit.FatalError(log, "Failed to init leader election", err)
 			return
 		}
 	}
@@ -143,7 +143,7 @@ func main() {
 		hc, err := healthcheck.NewHealthChecker(dnsProviders, metrics, notifier, elector)
 		if err != nil {
 			shutdowns.Run(log)
-			utils.FatalError(log, "Failed to init health checker", err)
+			slogkit.FatalError(log, "Failed to init health checker", err)
 			return
 		}
 		services = append(services, hc.Run)
@@ -159,7 +159,7 @@ func main() {
 		})
 		if err != nil {
 			shutdowns.Run(log)
-			utils.FatalError(log, "Failed to init server", err)
+			slogkit.FatalError(log, "Failed to init server", err)
 			return
 		}
 
@@ -173,7 +173,7 @@ func main() {
 		Run(ctx)
 	if err != nil {
 		shutdowns.Run(log)
-		utils.FatalError(log, "Failed to run service", err)
+		slogkit.FatalError(log, "Failed to run service", err)
 		return
 	}
 

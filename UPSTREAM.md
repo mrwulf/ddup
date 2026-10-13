@@ -3,13 +3,27 @@
 This file is specific to this fork: it tracks what has been, and still has to be, submitted to
 [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup). It must not be part of any upstream PR.
 
-Last reviewed: 2026-10-13. Upstream `main` is `e02794b`: it includes #6, #9, #15, #16, #17, #18, #19, #21 and #34, all squashed, plus go-kit 1.4.0 (`!file` and `!envfile` in the config, see #22) and the maintainer's `AGENTS.md`.
+Last reviewed: 2026-10-13. Upstream `main` is `e02794b`: it includes #6, #9, #15, #16, #17, #18, #19, #21 and #34, all squashed, plus go-kit 1.4.1 (`!file` and `!envfile` in the config, see #22) and the maintainer's `AGENTS.md`.
+The maintainer's three commits after #18 (`e3775bd` e2e tests and coverage, `4364230` go-kit helpers, `e02794b` README icon) were ported by hand, not merged: see "Ported by hand" below.
 The maintainer plans a release once #18 and #19 are merged; features go in the release after that.
 This fork's `main` records upstream as merged (`git merge -s ours`), because upstream squashes and the histories
 differ. **Always branch from `upstream/main` and apply the listed changes**; never open a PR from this fork's
 `main`. When upstream moves, port what the maintainer changed by hand (they push their own commits onto our PR
 branches: check `git log upstream/main` and the PR branches, for example the "💄" commits), then record the merge
 again with `-s ours`.
+
+## Ported by hand
+
+Upstream commits after the squashed PRs, whose content the `-s ours` merge did not bring in. Ported, with the fork-only features kept working:
+
+- `e02794b` (README icon centered in a `div`): applied to the fork's README, which keeps its own screenshots.
+- `4364230` (reuse go-kit): `pkg/signals` and `pkg/utils` are gone; `main.go` uses go-kit's `signals` and `slog.FatalError`, `buildinfo` uses go-kit's `utils.IsTruthy`, and the health checker uses `utils.StringSlicesMatch` where it compared the published sets (the fork's `ElementsMatch` caller). go-kit is 1.4.1.
+- `e3775bd` (Go tests, `status.go` fix, Playwright e2e):
+  - The status API now lists endpoints that failed fewer than `attempts` times but were never healthy (for example at startup); `getStatusObject` in the fork builds the richer endpoint objects.
+  - The Go tests were adapted to the fork's types: `[]dns.Target` instead of `[]string`, the extra CNAME query of the Cloudflare provider, `NewHealthChecker` with a notifier and an elector, endpoints looked up by `domainChecker.endpoints` (no `priorities` field), the status shape with `type`, `priority`, `active` and the timestamps (compared without them, those are covered by `since_test.go`), and the sample config test points `!file` secrets to temporary files.
+  - `pkg/utils/functions_test.go` was not ported: it tested helpers that moved to go-kit.
+  - The e2e suite (`dashboard/e2e`) was extended for the fork's dashboard: endpoint names, priority, standby, CNAME and proxied chips, the "since" text, the tab icon, the version footer and the theme button. The Playwright and CI wiring is upstream's.
+  - To run it against a system Chrome instead of downloading a browser, use a local config that wraps `playwright.config.ts` and sets `launchOptions.executablePath`; don't commit it.
 
 ## Rules from the maintainer
 
@@ -39,7 +53,7 @@ again with `-s ours`.
 | #15         | `UpdateRecords` reports whether anything changed | **Merged** |
 | #17         | Cache headers: stop caching the page and icon for 24h | **Merged** |
 | #21         | Health checks: open a new connection for every check (keep-alive made checks reuse one connection forever) | **Merged** (maintainer pushed a style-only "💄" commit, ported to the fork). Reminder to sign commits |
-| #18         | Overall status in the tab icon | **Merged 2026-10-13** as `7eafb33` (squashed), followed by the maintainer's e2e tests and a README icon tweak. Not yet compared with the fork's copy of the icon code |
+| #18         | Overall status in the tab icon | **Merged 2026-10-13** as `7eafb33` (squashed), followed by the maintainer's e2e tests and a README icon tweak (ported by hand, see below) |
 | #19         | Domain health counts as a segmented bar | **Merged 2026-10-13** as `bf4f058` (squashed, including the new README `screenshot.webp`). The maintainer chose design B, a segmented bar under the search bar that gets smaller with the screen. The merged tree is identical to our branch, so the fork needed no port. The squash message kept the title of the first commit ("compact pills") and its body |
 | #34         | Failover priorities for endpoints (issue #23) | **Merged 2026-10-13** as `d9557f9` (squashed), approved and merged without changes to our branch. The fork's own tier selection was replaced by upstream's: `pkg/healthcheck/priorities.go` (`endpointPriorities`, `selectLowestPriority`) and its tests are identical to upstream's, and the fork's `selectPublication` in `tiers.go` calls `selectLowestPriority`. Fork-only on top: typed targets (`proxied`, `cname` alone in its priority), the published set and tiers in the status API, webhooks and the dashboard standby state |
 | #35         | Version of the build in the dashboard footer (issue #28) | **Open, 2026-10-13**, no review yet. `GET /api/info` plus a muted footer line, from upstream's `buildinfo`. Branch `feat/version-footer` |

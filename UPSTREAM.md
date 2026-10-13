@@ -22,7 +22,7 @@ again with `-s ours`.
   one sentence per line in comments, never wrapped, and no trailing period on single-line comments; never declare variables inside
   `if` conditions; always braces around control flow bodies (TS/JS); pnpm, not npm; every enabled `<button>` needs `cursor: pointer`;
   run Go tests with `-tags unit`, and never put the `unit` tag in a `_test.go` file; run `make gen-config` when `pkg/config.Config`
-  or a struct it references changes (every config feature PR below does); don't stage or unstage changes unless asked.
+  or a struct it references changes (every config feature PR below does; the target runs `./tools/gen-config`, which isn't in upstream's repository, asked in [#32](https://github.com/ItalyPaleAle/ddup/issues/32)); don't stage or unstage changes unless asked.
   Also, from review: struct literals with one field per line; named results for `UpdateRecords`-style functions; blank line before
   `result.Changed = true`; `require.ErrorContains` instead of `assert.Contains(err.Error(), ...)`; run `gofmt`.
 - golangci-lint is pinned in `.golangci-lint-version`; install that release binary (package manager builds refuse this module's Go version).
@@ -58,7 +58,15 @@ and re-sign the commits (they are unsigned).
 | `chain/1-webhooks` ([#26](https://github.com/ItalyPaleAle/ddup/issues/26), priority 4) | Webhooks (`dns_updated`, `dns_update_failed`, `all_unhealthy`) | **Open question:** the maintainer asked to use `go-kit/webhook` and `go-kit/emailer`. go-kit's client has no custom method, templated body/headers, retry or timeout settings, and blocks LAN destinations (no way to allow them), so using it would drop features. Either contribute those to go-kit first or defend the notifier |
 | `chain/3-priorities` ([#23](https://github.com/ItalyPaleAle/ddup/issues/23), priority 1) | Failover priorities | Required. Maintainer said priorities and `proxied` could go on their own. Branch order is 2 then 3, but the PR order is 3 first |
 | `chain/2-proxied-targets` and `chain/4-cname` ([#24](https://github.com/ItalyPaleAle/ddup/issues/24), priority 2) | `proxied` Cloudflare records, typed DNS targets, CNAME targets, and the dashboard icons for proxied and CNAME (from `b6b0392`) | Required; one PR after priorities. Update the README sentence about DNS-only records. The CNAME case (Cloudflare Tunnel as a last resort) answers the questions in the closed issue #3 |
+| `feat/leader-election` ([#30](https://github.com/ItalyPaleAle/ddup/issues/30), deployed as fork.18 to fork.20) | Optional Lease-based leader election for several replicas, and standbys forwarding API requests to the leader | Opt-in, off by default. It adds `k8s.io/client-go`; the issue offers a build tag. Not on the fork's `main` until the PR for `chore/retire-secretstring` is merged, which merges this branch |
 | `chain/5-iplookup` ([#25](https://github.com/ItalyPaleAle/ddup/issues/25), priority 3) | `ipLookup` for dynamic DNS | Required. Use case answered (replaces a DDNS script: ddup already has the credentials and the DNS update logic). Includes the shared-address and URL-redaction fixes. **Add the no-keep-alive lookup client** (`lookupClient`, the "use a new connection for every lookup" commit on `main`) when rebasing |
+
+## Ideas filed upstream, not built yet
+
+| Issue | What |
+| :---- | :--- |
+| [#31](https://github.com/ItalyPaleAle/ddup/issues/31) | Dashboard tooltip with "healthy since" or "failing since" and the last failure, from two in-memory timestamps per endpoint (no history) |
+| [#32](https://github.com/ItalyPaleAle/ddup/issues/32) | Optional `mise.toml` (or `make check`) that runs what CI runs; also asks about the missing `tools/gen-config` and a `v` in `AGENTS.md`'s install snippet |
 
 ## Changes on `main` not covered by the above
 
@@ -76,7 +84,7 @@ and re-sign the commits (they are unsigned).
 
 ## Fork-only on purpose
 
-- Webhook `vars` (values for the templates, loaded with upstream's `!file` and `!envfile`), which replaced the fork's `env` template function. Issue pending.
+- Webhook `vars` (values for the templates, loaded with upstream's `!file` and `!envfile`), which replaced the fork's `env` template function. Upstream issue [#33](https://github.com/ItalyPaleAle/ddup/issues/33) (needs the webhooks PR first).
 - The theme switcher (declined upstream, see #20).
 - CNAME targets, until there's agreement in issue [#24](https://github.com/ItalyPaleAle/ddup/issues/24).
 - `FORK.md`, its `screenshots/` (sample data only), and the README's screenshots and link to `FORK.md` (the README image replaced upstream's `screenshot.webp`, which this fork deleted). Keep them out of upstream PRs.

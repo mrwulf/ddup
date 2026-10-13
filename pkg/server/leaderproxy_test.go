@@ -110,9 +110,12 @@ func TestLeaderProxy(t *testing.T) {
 
 	t.Run("an unreachable leader falls back to a local answer", func(t *testing.T) {
 		// Reserve a port, then close it so nothing listens there
-		l, err := net.Listen("tcp", "127.0.0.1:0")
+		var lc net.ListenConfig
+		l, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
 		require.NoError(t, err)
-		port := l.Addr().(*net.TCPAddr).Port
+		addr, ok := l.Addr().(*net.TCPAddr)
+		require.True(t, ok)
+		port := addr.Port
 		require.NoError(t, l.Close())
 
 		cfg := config.Get()

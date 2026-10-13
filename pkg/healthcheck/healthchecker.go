@@ -255,10 +255,11 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		}
 
 		// Check if what we publish has changed
-		if !isLeader {
+		switch {
+		case !isLeader:
 			// Standby: keep tracking health below, but leave DNS and webhooks to the leader
 			domainLog.DebugContext(ctx, "Not the leader, skipping DNS update")
-		} else if resync || !utils.ElementsMatch(prevPub.keys(), newPub.keys()) {
+		case resync || !utils.ElementsMatch(prevPub.keys(), newPub.keys()):
 			// Update DNS records
 			if len(newHealthyIPs) > 0 {
 				var res dns.UpdateResult
@@ -291,7 +292,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 			} else {
 				domainLog.WarnContext(ctx, "No healthy endpoints found, not updating DNS")
 			}
-		} else {
+		default:
 			domainLog.DebugContext(ctx, "Published targets unchanged, skipping DNS update", "healthy", newHealthyIPs, "published", event.Published)
 		}
 

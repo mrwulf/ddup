@@ -19,7 +19,7 @@ Each endpoint row shows what ddup publishes and why:
 
 ### Summary, search and controls
 
-The pills next to the search bar count healthy, warning and unhealthy domains.
+The bar under the search bar counts healthy, warning and unhealthy domains.
 **Check now** runs all health checks immediately, and the split button controls auto-refresh.
 The last button cycles the theme between system, light and dark.
 

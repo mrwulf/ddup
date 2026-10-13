@@ -48,9 +48,9 @@ type Config struct {
 // ConfigDomain represents a single domain and its endpoints
 type ConfigDomain struct {
 	// RecordName is the DNS record to update for this domain (e.g., "app.example.com")
-	// Can use !env and !file
+	// Can use !file and !envfile
 	// +required
-	RecordName SecretString `yaml:"recordName"`
+	RecordName string `yaml:"recordName"`
 
 	// Name of the DNS provider as configured in the `providers` dictionary.
 	// +required
@@ -100,17 +100,17 @@ type ConfigWebhook struct {
 	Name string `yaml:"name"`
 
 	// URL to call
-	// Can use !env and !file
+	// Can use !file and !envfile
 	// +required
-	URL SecretString `yaml:"url"`
+	URL string `yaml:"url"`
 
 	// HTTP method
 	// Defaults to POST
 	Method string `yaml:"method"`
 
 	// Additional headers to send
-	// Values are Go templates, rendered with the event, and can use !env and !file
-	Headers map[string]SecretString `yaml:"headers"`
+	// Values are Go templates, rendered with the event, and can use !file and !envfile
+	Headers map[string]string `yaml:"headers"`
 
 	// Events that trigger this webhook; if empty, all events
 	// Valid values: dns_updated, dns_update_failed, all_unhealthy
@@ -211,33 +211,33 @@ type ConfigProvider struct {
 
 // CloudflareConfig represents Cloudflare-specific configuration
 type CloudflareConfig struct {
-	APIToken SecretString `yaml:"apiToken"`
-	ZoneID   SecretString `yaml:"zoneId"`
+	APIToken string `yaml:"apiToken"`
+	ZoneID   string `yaml:"zoneId"`
 }
 
 // OVHConfig represents OVH-specific configuration
 type OVHConfig struct {
-	APIKey      SecretString `yaml:"apiKey"`
-	APISecret   SecretString `yaml:"apiSecret"`
-	ConsumerKey SecretString `yaml:"consumerKey"`
-	ZoneName    SecretString `yaml:"zoneName"`
+	APIKey      string `yaml:"apiKey"`
+	APISecret   string `yaml:"apiSecret"`
+	ConsumerKey string `yaml:"consumerKey"`
+	ZoneName    string `yaml:"zoneName"`
 	// OVH API endpoint (defaults to EU if not specified)
 	// Valid values: "eu", "ca", "us" or full URL
-	Endpoint SecretString `yaml:"endpoint,omitempty"`
+	Endpoint string `yaml:"endpoint,omitempty"`
 }
 
 // AzureConfig represents Azure DNS-specific configuration
 type AzureConfig struct {
-	SubscriptionID    SecretString `yaml:"subscriptionId"`
-	ResourceGroupName SecretString `yaml:"resourceGroupName"`
-	ZoneName          SecretString `yaml:"zoneName"`
-	TenantID          SecretString `yaml:"tenantId"`
+	SubscriptionID    string `yaml:"subscriptionId"`
+	ResourceGroupName string `yaml:"resourceGroupName"`
+	ZoneName          string `yaml:"zoneName"`
+	TenantID          string `yaml:"tenantId"`
 	// Client ID for authenticating with a service principal
-	ClientID SecretString `yaml:"clientId,omitempty"`
+	ClientID string `yaml:"clientId,omitempty"`
 	// Client secret for authenticating with a service principal
-	ClientSecret SecretString `yaml:"clientSecret,omitempty"`
+	ClientSecret string `yaml:"clientSecret,omitempty"`
 	// Managed identity client ID for authenticating with a user-assigned managed identity
-	ManagedIdentityClientID SecretString `yaml:"managedIdentityClientId,omitempty"`
+	ManagedIdentityClientID string `yaml:"managedIdentityClientId,omitempty"`
 }
 
 // ConfigLogs represents logging configuration
@@ -547,7 +547,7 @@ var WebhookEvents = []string{"dns_updated", "dns_update_failed", "all_unhealthy"
 func (c *Config) validateWebhooks() error {
 	for i := range c.Webhooks {
 		w := &c.Webhooks[i]
-		u, err := url.Parse(w.URL.String())
+		u, err := url.Parse(w.URL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return fmt.Errorf("webhook %d is invalid: url must be an absolute http(s) URL", i)
 		}
@@ -575,7 +575,7 @@ func (c *Config) validateWebhooks() error {
 			return fmt.Errorf("webhook %q is invalid: body template: %w", w.Name, err)
 		}
 		for k, v := range w.Headers {
-			_, err = template.New(k).Funcs(WebhookTemplateFuncs).Parse(v.String())
+			_, err = template.New(k).Funcs(WebhookTemplateFuncs).Parse(v)
 			if err != nil {
 				return fmt.Errorf("webhook %q is invalid: header %q template: %w", w.Name, k, err)
 			}

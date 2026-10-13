@@ -244,7 +244,7 @@ func New(webhooks []config.ConfigWebhook) (*Notifier, error) {
 			}
 		}
 		for k, v := range w.Headers {
-			h.headers[k], err = template.New(k).Funcs(config.WebhookTemplateFuncs).Parse(v.String())
+			h.headers[k], err = template.New(k).Funcs(config.WebhookTemplateFuncs).Parse(v)
 			if err != nil {
 				return nil, fmt.Errorf("webhook %q: header %q template: %w", w.Name, k, err)
 			}
@@ -361,7 +361,7 @@ func (n *Notifier) send(ctx context.Context, h *hook, body []byte, contentType s
 	ctx, cancel := context.WithTimeout(ctx, h.cfg.Timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, h.cfg.Method, h.cfg.URL.String(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, h.cfg.Method, h.cfg.URL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}

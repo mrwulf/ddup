@@ -87,13 +87,14 @@ sudo systemctl enable --now ddup
 
 ddup requires a configuration file `config.yaml` in one of the following paths:
 
+- The path defined in the `DDUP_CONFIG` env var
 - `/etc/ddup/config.yaml`
 - `$HOME/.ddup/config.yaml`
 - Or in the same folder where the ddup binary is located
 
-> You can specify a custom configuration file using the `DDUP_CONFIG` environmental variable.
-
 You can find an example of the configuration file, and a description of every option, in the [`config.sample.yaml`](/config.sample.yaml) file.
+
+> A config file can reference other files to load secrets from, using `!file /path/to/file` or `!envfile /path/to/.env VAR_NAME`. See [go-kit's README](https://github.com/ItalyPaleAle/go-kit/blob/main/config/README.md) for more details.
 
 ## Configuration Options
 
@@ -105,7 +106,7 @@ You can find an example of the configuration file, and a description of every op
 
 - `webhooks`: Optional webhooks called on events (see `config.sample.yaml`): `url`, `method`, `headers`, `events` (`dns_updated`, `dns_update_failed`, `all_unhealthy`), `body` (Go template; JSON event if omitted; templates can use `.Status`, `.StatusTag`, `.StatusEmoji`, `.Subject`, `.Text`, `join` and `json`, see the email example), `timeout`, `attempts`. Deliveries are retried with exponential backoff.
 - `domains`: Array of domains to manage
-  - `recordName`: The DNS record to update (e.g., "api.example.com"). Can use `!env` and `!file` (see [Providers Configuration](#providers-configuration))
+  - `recordName`: The DNS record to update (e.g., "api.example.com"). Can use `!file` and `!envfile` (see [Providers Configuration](#providers-configuration))
   - `provider`: Name of the DNS provider (from the [`providers` map](#providers-configuration))
   - `ttl`: Time to live for DNS records. A short value is preferred to ensure faster failover from failed deployments. The default value is 120 (seconds, equivalent to 2 minutes)
   - `healthChecks`: Configuration for health checks
@@ -174,7 +175,9 @@ domains:
 
 ### Providers Configuration
 
-Provider settings (and webhook `url` and header values) can come from the environment or a file, so the config file doesn't need to contain secrets: `apiToken: !env CLOUDFLARE_API_TOKEN` or `apiToken: !file /run/secrets/token`. ddup fails at startup if the variable or file is missing. In webhook templates, use `{{ env "NAME" }}`.
+Any string setting (provider settings, webhook `url` and header values, `recordName`) can come from a file, so the config file doesn't need to contain secrets: `apiToken: !file /run/secrets/token`, or `apiToken: !envfile /run/secrets/ddup.env CLOUDFLARE_API_TOKEN` to read one variable from a dotenv file. ddup fails at startup if the file or variable is missing. A value is read whole, so a header such as `Bearer <token>` needs the prefix in the file.
+
+In webhook templates, `{{ env "NAME" }}` reads an environment variable (this fork only).
 
 - `providers`: Map of providers.
   - Key: provider name (e.g. `my-provider-1`)

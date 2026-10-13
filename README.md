@@ -248,3 +248,9 @@ The server has no authentication, so keep it on a trusted network. It exposes:
 - `log`: Logging options
   - `level`: Controls log level and verbosity. Supported values: `debug`, `info` (default), `warn`, `error`.
   - `json`: If true, emits logs formatted as JSON, otherwise uses a text-based structured log format. Defaults to false if a TTY is attached (e.g. when running the binary directly in the terminal or in development); true otherwise.
+
+## Development
+
+If you use [mise](https://mise.jdx.dev), `mise.toml` installs Node.js, pnpm and the pinned golangci-lint, and `mise run check` runs the same checks as CI (it builds the dashboard first, as the Go code embeds it).
+Run `mise tasks` to list the individual steps.
+Go itself is not managed by mise.

@@ -1,0 +1,48 @@
+# Optional: pins the development tools and runs the same checks as CI
+# The versions come from the files the repo already has (.node-version, dashboard/package.json, .golangci-lint-version)
+# Go is not listed: use the toolchain you have, as go.mod makes Go download the version it needs
+
+[settings]
+# Read node from .node-version
+idiomatic_version_file_enable_tools = ["node"]
+
+[tools]
+# Reads the "packageManager" field in dashboard/package.json
+pnpm = "{{ exec(command='grep -oE pnpm@[0-9.]+ dashboard/package.json | cut -d@ -f2') | trim }}"
+golangci-lint = "{{ read_file(path='.golangci-lint-version') | trim }}"
+
+# The Go code embeds dashboard/dist, so the dashboard must be built before the lint and test tasks
+[tasks.dashboard]
+description = "Install, check and build the dashboard"
+dir = "dashboard"
+run = [
+  "pnpm install",
+  "pnpm type-check",
+  "pnpm lint",
+  "pnpm format:check",
+  "pnpm build",
+]
+
+[tasks.deps-age]
+description = "Check the minimum age of Go dependencies"
+run = "go tool gomod-age"
+
+[tasks.lint]
+description = "Run golangci-lint"
+env = { CGO_ENABLED = "0" }
+run = "golangci-lint run"
+
+[tasks.test]
+description = "Run the Go tests"
+env = { CGO_ENABLED = "0" }
+run = "make test"
+
+[tasks.check]
+description = "Everything CI runs"
+# Same order as CI, stopping at the first failure
+run = [
+  { task = "deps-age" },
+  { task = "dashboard" },
+  { task = "lint" },
+  { task = "test" },
+]

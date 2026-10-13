@@ -79,10 +79,10 @@ domains:
           family: 4
 
 # Provider Configuration
-# Any provider setting, plus webhook "url" and header values, can read secrets from the environment or a file instead of the config file:
-#   apiToken: !env CLOUDFLARE_API_TOKEN
+# Any string setting can read secrets from a file instead of the config file:
 #   apiToken: !file /run/secrets/cloudflare-token
-# ddup fails at startup if the variable or file is missing. In webhook "body" templates, use {{ env "NAME" }}
+#   apiToken: !envfile /run/secrets/ddup.env CLOUDFLARE_API_TOKEN
+# ddup fails at startup if the file or variable is missing. In webhook "body" templates, {{ env "NAME" }} reads an environment variable (this fork only)
 providers:
   example-provider-1:
     cloudflare:

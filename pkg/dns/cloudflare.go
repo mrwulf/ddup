@@ -28,17 +28,17 @@ type CloudflareProvider struct {
 
 // NewCloudflareProvider creates a new Cloudflare DNS provider
 func NewCloudflareProvider(name string, cfg *config.CloudflareConfig, metrics *appmetrics.AppMetrics) (*CloudflareProvider, error) {
-	if cfg.APIToken.String() == "" {
+	if cfg.APIToken == "" {
 		return nil, errors.New("API token is required")
 	}
-	if cfg.ZoneID.String() == "" {
+	if cfg.ZoneID == "" {
 		return nil, errors.New("zone ID is required")
 	}
 
 	return &CloudflareProvider{
 		name:       name,
-		apiToken:   cfg.APIToken.String(),
-		zoneID:     cfg.ZoneID.String(),
+		apiToken:   cfg.APIToken,
+		zoneID:     cfg.ZoneID,
 		metrics:    metrics,
 		httpClient: http.DefaultClient,
 	}, nil

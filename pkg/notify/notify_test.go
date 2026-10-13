@@ -34,9 +34,9 @@ func TestNotifier_FilteringTemplatesAndRetry(t *testing.T) {
 	defer srv.Close()
 
 	hooks := []config.ConfigWebhook{
-		{Name: "tmpl", URL: config.SecretString(srv.URL), Method: "POST", Events: []string{EventDNSUpdated}, Attempts: 3, Timeout: time.Second,
-			Body: "{{ .Domain }} -> {{ join .Healthy \",\" }}", Headers: map[string]config.SecretString{"Title": "{{ .Subject }}"}},
-		{Name: "other", URL: config.SecretString(srv.URL), Method: "POST", Events: []string{EventAllUnhealthy}, Attempts: 1, Timeout: time.Second},
+		{Name: "tmpl", URL: srv.URL, Method: "POST", Events: []string{EventDNSUpdated}, Attempts: 3, Timeout: time.Second,
+			Body: "{{ .Domain }} -> {{ join .Healthy \",\" }}", Headers: map[string]string{"Title": "{{ .Subject }}"}},
+		{Name: "other", URL: srv.URL, Method: "POST", Events: []string{EventAllUnhealthy}, Attempts: 1, Timeout: time.Second},
 	}
 	n, err := New(hooks)
 	require.NoError(t, err)
@@ -68,7 +68,7 @@ func TestNotifier_DefaultJSONAndNil(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	n, err := New([]config.ConfigWebhook{{Name: "j", URL: config.SecretString(srv.URL), Method: "POST", Attempts: 1, Timeout: time.Second}})
+	n, err := New([]config.ConfigWebhook{{Name: "j", URL: srv.URL, Method: "POST", Attempts: 1, Timeout: time.Second}})
 	require.NoError(t, err)
 	n.Notify(t.Context(), Event{Type: EventAllUnhealthy, Domain: "a.example.com"})
 	n.Wait(5 * time.Second)

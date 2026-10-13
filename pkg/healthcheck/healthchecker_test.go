@@ -474,7 +474,7 @@ func TestHealthChecker_Webhooks(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	n, err := notify.New([]config.ConfigWebhook{{Name: "t", URL: config.SecretString(srv.URL), Method: "POST", Attempts: 1, Timeout: time.Second}})
+	n, err := notify.New([]config.ConfigWebhook{{Name: "t", URL: srv.URL, Method: "POST", Attempts: 1, Timeout: time.Second}})
 	require.NoError(t, err)
 
 	mockProvider := dns.NewMockProvider(false)
@@ -550,7 +550,7 @@ func TestHealthChecker_NoNotificationWhenDNSAlreadyUpToDate(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	n, err := notify.New([]config.ConfigWebhook{{Name: "t", URL: config.SecretString(srv.URL), Method: "POST", Attempts: 1, Timeout: time.Second}})
+	n, err := notify.New([]config.ConfigWebhook{{Name: "t", URL: srv.URL, Method: "POST", Attempts: 1, Timeout: time.Second}})
 	require.NoError(t, err)
 
 	// The provider reports that DNS already matched, like on startup after a restart
@@ -737,7 +737,7 @@ func TestHealthChecker_TierChangeEvent(t *testing.T) {
 		events <- ev
 	}))
 	defer srv.Close()
-	n, err := notify.New([]config.ConfigWebhook{{Name: "t", URL: config.SecretString(srv.URL), Method: "POST", Attempts: 1, Timeout: time.Second}})
+	n, err := notify.New([]config.ConfigWebhook{{Name: "t", URL: srv.URL, Method: "POST", Attempts: 1, Timeout: time.Second}})
 	require.NoError(t, err)
 
 	us := &config.ConfigEndpoint{Name: "us", IP: "1.1.1.1"}

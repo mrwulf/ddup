@@ -35,13 +35,13 @@ type AzureProvider struct {
 
 // NewAzureProvider creates a new Azure DNS provider
 func NewAzureProvider(name string, cfg *config.AzureConfig, metrics *appmetrics.AppMetrics) (*AzureProvider, error) {
-	if cfg.SubscriptionID.String() == "" {
+	if cfg.SubscriptionID == "" {
 		return nil, errors.New("subscription ID is required")
 	}
-	if cfg.ResourceGroupName.String() == "" {
+	if cfg.ResourceGroupName == "" {
 		return nil, errors.New("resource group name is required")
 	}
-	if cfg.ZoneName.String() == "" {
+	if cfg.ZoneName == "" {
 		return nil, errors.New("zone name is required")
 	}
 
@@ -58,21 +58,21 @@ func NewAzureProvider(name string, cfg *config.AzureConfig, metrics *appmetrics.
 
 	// Otherwise, use the default credentials
 	switch {
-	case cfg.ClientID.String() != "" && cfg.ClientSecret.String() != "":
+	case cfg.ClientID != "" && cfg.ClientSecret != "":
 		// If client ID and secret are specified, use the service principal
-		slog.Info("Authenticating to Azure with a service principal", slog.String("clientId", cfg.ClientID.String()))
-		credential, err = azidentity.NewClientSecretCredential(cfg.TenantID.String(), cfg.ClientID.String(), cfg.ClientSecret.String(), &azidentity.ClientSecretCredentialOptions{
+		slog.Info("Authenticating to Azure with a service principal", slog.String("clientId", cfg.ClientID))
+		credential, err = azidentity.NewClientSecretCredential(cfg.TenantID, cfg.ClientID, cfg.ClientSecret, &azidentity.ClientSecretCredentialOptions{
 			ClientOptions: clientOpts,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("error creating service principal credential: %w", err)
 		}
-	case cfg.ManagedIdentityClientID.String() != "":
+	case cfg.ManagedIdentityClientID != "":
 		// Use managed identity with a specific client ID (for user-assigned identities)
-		slog.Info("Authenticating to Azure with a managed identity", slog.String("managedIdentityClientID", cfg.ManagedIdentityClientID.String()))
+		slog.Info("Authenticating to Azure with a managed identity", slog.String("managedIdentityClientID", cfg.ManagedIdentityClientID))
 		credential, err = azidentity.NewManagedIdentityCredential(&azidentity.ManagedIdentityCredentialOptions{
 			ClientOptions: clientOpts,
-			ID:            azidentity.ClientID(cfg.ManagedIdentityClientID.String()),
+			ID:            azidentity.ClientID(cfg.ManagedIdentityClientID),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("error creating service principal credential: %w", err)
@@ -82,7 +82,7 @@ func NewAzureProvider(name string, cfg *config.AzureConfig, metrics *appmetrics.
 		slog.Info("Authenticating to Azure with the default options")
 		credential, err = azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
 			ClientOptions: clientOpts,
-			TenantID:      cfg.TenantID.String(),
+			TenantID:      cfg.TenantID,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("error creating Default Azure credential: %w", err)
@@ -91,9 +91,9 @@ func NewAzureProvider(name string, cfg *config.AzureConfig, metrics *appmetrics.
 
 	return &AzureProvider{
 		name:              name,
-		subscriptionID:    cfg.SubscriptionID.String(),
-		resourceGroupName: cfg.ResourceGroupName.String(),
-		zoneName:          cfg.ZoneName.String(),
+		subscriptionID:    cfg.SubscriptionID,
+		resourceGroupName: cfg.ResourceGroupName,
+		zoneName:          cfg.ZoneName,
 		credential:        credential,
 		metrics:           metrics,
 		httpClient:        http.DefaultClient,

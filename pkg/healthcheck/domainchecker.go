@@ -2,6 +2,7 @@ package healthcheck
 
 import (
 	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -29,6 +30,94 @@ type domainChecker struct {
 	allDown bool
 	// Last update error that webhooks were notified about; used to avoid repeating the same notification
 	notifiedError string
+
+	// When each endpoint last changed state and last failed, by target; in memory only
+	times map[string]*endpointTimes
+	// Returns the current time; nil means time.Now
+	clock func() time.Time
+}
+
+// endpointTimes tracks the state changes of one endpoint
+type endpointTimes struct {
+	healthy bool
+	// When the endpoint last changed state; for a new endpoint, when it was first checked
+	since time.Time
+	// True until the endpoint changes state for the first time, so `since` is only when ddup first saw it
+	sinceStart bool
+	// Last time a check failed; zero if never
+	lastFailure time.Time
+	// True if a check of the endpoint ran in the current cycle
+	seen bool
+}
+
+func (dc *domainChecker) now() time.Time {
+	if dc.clock != nil {
+		return dc.clock()
+	}
+	return time.Now()
+}
+
+// recordCheck notes the outcome of a single check of an endpoint
+func (dc *domainChecker) recordCheck(target string, healthy bool) {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	if dc.times == nil {
+		dc.times = make(map[string]*endpointTimes)
+	}
+	t := dc.times[target]
+	if t == nil {
+		t = &endpointTimes{}
+		dc.times[target] = t
+	}
+	t.seen = true
+	if !healthy {
+		t.lastFailure = dc.now()
+	}
+}
+
+// updateTimes records the state changes after a cycle, given the targets that are healthy now
+// Endpoints that were not checked in this cycle are forgotten, unless they are still configured
+func (dc *domainChecker) updateTimes(healthyIPs []string) {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	now := dc.now()
+	for target, t := range dc.times {
+		if !t.seen {
+			_, configured := dc.endpoints[target]
+			if !configured {
+				delete(dc.times, target)
+			}
+			continue
+		}
+		t.seen = false
+
+		healthy := slices.Contains(healthyIPs, target)
+		switch {
+		case t.since.IsZero():
+			t.healthy = healthy
+			t.since = now
+			t.sinceStart = true
+		case t.healthy != healthy:
+			t.healthy = healthy
+			t.since = now
+			t.sinceStart = false
+		}
+	}
+}
+
+// getTimes returns a copy of the times for an endpoint, or nil if there are none
+func (dc *domainChecker) getTimes(target string) *endpointTimes {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	t := dc.times[target]
+	if t == nil || t.since.IsZero() {
+		return nil
+	}
+	cp := *t
+	return &cp
 }
 
 func (dc *domainChecker) getState() (healthyIPs []string, failedIPs map[string]int, lastUpdated time.Time, lastError string) {

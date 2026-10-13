@@ -172,6 +172,10 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 			}
 			endpointStates = append(endpointStates, state)
 
+			if ip != "" {
+				dc.recordCheck(ip, result.Healthy)
+			}
+
 			// An endpoint whose IP address has never been found has nothing we can publish or keep track of
 			if ip == "" {
 				domainLog.WarnContext(ctx, "✗ Endpoint has no IP address", "endpoint", result.Endpoint.Name, "error", result.Error)
@@ -217,6 +221,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		dc.setRecovering(recovering)
 
 		dc.noteTargets(results, newHealthyIPs, currentHealthyIPs, slices.Collect(maps.Keys(failedIPs)))
+		dc.updateTimes(newHealthyIPs)
 		endpoints := dc.getEndpoints()
 
 		// Only the healthy endpoints with the lowest priority value are published

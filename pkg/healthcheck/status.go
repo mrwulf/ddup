@@ -28,6 +28,12 @@ type DomainStatusEndpoint struct {
 	// True if the endpoint is published in DNS: it's healthy and has the lowest priority value among the healthy endpoints
 	Active       bool `json:"active"`
 	FailureCount int  `json:"failureCount,omitempty"`
+	// When the endpoint last changed state, from healthy to failing or the other way around
+	Since *time.Time `json:"since,omitempty"`
+	// True if `since` is when ddup first checked the endpoint, not a state change, so the real start is unknown
+	SinceStart bool `json:"sinceStart,omitempty"`
+	// Last time a check of the endpoint failed
+	LastFailure *time.Time `json:"lastFailure,omitempty"`
 }
 
 func (hc *HealthChecker) GetAllDomainsStatus() map[string]DomainStatus {
@@ -62,6 +68,14 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 			Type:         dns.Target{Value: target}.RecordType(),
 			Active:       healthy && slices.Contains(published, target),
 			FailureCount: failureCount,
+		}
+		times := dc.getTimes(target)
+		if times != nil {
+			e.Since = &times.since
+			e.SinceStart = times.sinceStart
+			if !times.lastFailure.IsZero() {
+				e.LastFailure = &times.lastFailure
+			}
 		}
 		ep := byTarget[target]
 		if ep != nil {

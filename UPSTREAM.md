@@ -61,11 +61,16 @@ and re-sign the commits (they are unsigned).
 | `feat/leader-election` ([#30](https://github.com/ItalyPaleAle/ddup/issues/30), deployed as fork.18 to fork.20) | Optional Lease-based leader election for several replicas, and standbys forwarding API requests to the leader | Opt-in, off by default. It adds `k8s.io/client-go`; the issue offers a build tag. Not on the fork's `main` until the PR for `chore/retire-secretstring` is merged, which merges this branch |
 | `chain/5-iplookup` ([#25](https://github.com/ItalyPaleAle/ddup/issues/25), priority 3) | `ipLookup` for dynamic DNS | Required. Use case answered (replaces a DDNS script: ddup already has the credentials and the DNS update logic). Includes the shared-address and URL-redaction fixes. **Add the no-keep-alive lookup client** (`lookupClient`, the "use a new connection for every lookup" commit on `main`) when rebasing |
 
+## Built, waiting for the issue to be agreed
+
+| Branch | Feature | Notes |
+| :----- | :------ | :---- |
+| `feat/endpoint-since` ([#31](https://github.com/ItalyPaleAle/ddup/issues/31)) | Dashboard tooltip with "healthy since" or "failing since" and the last failure, from in-memory timestamps per endpoint (no history); the status API gets `since`, `sinceStart` and `lastFailure` | Built, not yet a PR; it sits on `feat/webhook-vars`, so rebase onto `upstream/main` once the issue is agreed (it needs the endpoint rows from [#27](https://github.com/ItalyPaleAle/ddup/issues/27)) |
+
 ## Ideas filed upstream, not built yet
 
 | Issue | What |
 | :---- | :--- |
-| [#31](https://github.com/ItalyPaleAle/ddup/issues/31) | Dashboard tooltip with "healthy since" or "failing since" and the last failure, from two in-memory timestamps per endpoint (no history) |
 | [#32](https://github.com/ItalyPaleAle/ddup/issues/32) | Optional `mise.toml` (or `make check`) that runs what CI runs; also asks about the missing `tools/gen-config` and a `v` in `AGENTS.md`'s install snippet |
 
 ## Changes on `main` not covered by the above

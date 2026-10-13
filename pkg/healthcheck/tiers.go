@@ -34,24 +34,24 @@ func (p publication) values() []string {
 }
 
 // selectPublication picks what to publish for the healthy targets (IPs or CNAME hostnames)
-// Only the healthy endpoints with the lowest priority value are published. Targets that don't match a known endpoint count as priority 0
+// The selection is selectLowestPriority; the targets are then given the proxied setting of their endpoint
+// Targets that don't match a known endpoint count as priority 0 and are not proxied
 func selectPublication(endpoints map[string]*config.ConfigEndpoint, healthy []string) publication {
-	var pub publication
-	for i, value := range healthy {
-		var t dns.Target
-		var priority int
-		t.Value = value
+	priorities := make(map[string]int, len(endpoints))
+	for target, ep := range endpoints {
+		priorities[target] = ep.Priority
+	}
+
+	selected := selectLowestPriority(priorities, healthy)
+	pub := publication{
+		targets: make([]dns.Target, len(selected)),
+	}
+	for i, value := range selected {
+		pub.targets[i].Value = value
 		ep := endpoints[value]
 		if ep != nil {
-			t.Proxied = ep.Proxied
-			priority = ep.Priority
-		}
-
-		switch {
-		case i == 0 || priority < pub.priority:
-			pub = publication{targets: []dns.Target{t}, priority: priority}
-		case priority == pub.priority:
-			pub.targets = append(pub.targets, t)
+			pub.targets[i].Proxied = ep.Proxied
+			pub.priority = ep.Priority
 		}
 	}
 	return pub

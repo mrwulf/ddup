@@ -16,6 +16,8 @@ type MockProvider struct {
 	NoChange bool
 	// IPs reported as previously in DNS
 	Previous []string
+	// IPs passed to the last call of UpdateRecords
+	LastIPs []string
 	// Targets passed to the last UpdateRecords call
 	LastTargets []Target
 }
@@ -34,6 +36,10 @@ func (m *MockProvider) Name() string {
 func (m *MockProvider) UpdateRecords(ctx context.Context, domain string, ttl int, targets []Target) (UpdateResult, error) {
 	m.CallCount++
 	m.LastTargets = targets
+	m.LastIPs = make([]string, len(targets))
+	for i, t := range targets {
+		m.LastIPs[i] = t.Value
+	}
 	if m.ShouldError {
 		return UpdateResult{}, errors.New("mock error")
 	}

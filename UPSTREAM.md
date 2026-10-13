@@ -3,7 +3,7 @@
 This file is specific to this fork: it tracks what has been, and still has to be, submitted to
 [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup). It must not be part of any upstream PR.
 
-Last reviewed: 2026-10-13. Upstream `main` is `c5b47cf`: it includes #6, #9, #15, #16, #17 and #21, all squashed, plus go-kit 1.4.0 (`!file` and `!envfile` in the config, see #22) and the maintainer's `AGENTS.md`.
+Last reviewed: 2026-10-13. Upstream `main` is `bf4f058`: it includes #6, #9, #15, #16, #17, #19 and #21, all squashed, plus go-kit 1.4.0 (`!file` and `!envfile` in the config, see #22) and the maintainer's `AGENTS.md`.
 The maintainer plans a release once #18 and #19 are merged; features go in the release after that.
 This fork's `main` records upstream as merged (`git merge -s ours`), because upstream squashes and the histories
 differ. **Always branch from `upstream/main` and apply the listed changes**; never open a PR from this fork's
@@ -40,7 +40,7 @@ again with `-s ours`.
 | #17         | Cache headers: stop caching the page and icon for 24h | **Merged** |
 | #21         | Health checks: open a new connection for every check (keep-alive made checks reuse one connection forever) | **Merged** (maintainer pushed a style-only "💄" commit, ported to the fork). Reminder to sign commits |
 | #18         | Overall status in the tab icon | **Open, updated 2026-10-13.** The maintainer chose the round "d" with the shape badge (check, warning triangle, cross; a grey circle with a dash for unknown) and asked for an SVG of the icon without the badge, which is now `dashboard/public/favicon.svg`, and for the icon in the header, with its status. Done in `e80cb64` on `pr/13-tab-icon-status`, replied. The README screenshot is not changed in this PR, because #19 changes `screenshot.webp` and two PRs on one binary file would conflict: after both merge, check that `screenshot.webp` shows the header icon. Fork line: `feat/tab-icon-shapes` |
-| #19         | Domain health counts as compact pills | **Open, updated 2026-10-13.** The maintainer chose design B, a segmented bar under the search bar that gets smaller with the screen. Done in `a215e43` on `pr/14-summary-pills`, with a new README `screenshot.webp` in `f85c255`, replied. Fork line: `feat/summary-bar` |
+| #19         | Domain health counts as a segmented bar | **Merged 2026-10-13** as `bf4f058` (squashed, including the new README `screenshot.webp`). The maintainer chose design B, a segmented bar under the search bar that gets smaller with the screen. The merged tree is identical to our branch, so the fork needed no port. The squash message kept the title of the first commit ("compact pills") and its body |
 | #34         | Failover priorities for endpoints (issue #23) | **Open, 2026-10-13**, no review yet. A standalone version on `upstream/main`: priorities only, no CNAME, proxied or dashboard changes. Branch `feat/priorities` |
 | #35         | Version of the build in the dashboard footer (issue #28) | **Open, 2026-10-13**, no review yet. `GET /api/info` plus a muted footer line, from upstream's `buildinfo`. Branch `feat/version-footer` |
 | #20         | Light/dark/system theme switcher | **Declined** (closed by the maintainer): causes theme flicker, and respecting the browser preference is the right choice. Fork-only, don't resubmit |

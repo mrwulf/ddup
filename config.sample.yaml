@@ -39,9 +39,10 @@ domains:
         url: "http://192.168.1.201:9000/health"
         ip: "192.168.1.201"
 
-  # Failover tiers: only the healthy endpoints with the lowest "priority" are published (default 0), and ddup falls back to the next
-  # priority when none are healthy. Endpoints with the same priority are all published (round-robin).
-  # An endpoint publishes either an "ip" (A/AAAA record) or a "cname" (CNAME record, which must be alone in its priority).
+  # Endpoints have priority 0 by default, and lower values are preferred
+  # DNS only contains the healthy endpoints with the lowest priority value
+  # Endpoints with the same priority are published together
+  # An endpoint publishes either an "ip" (A/AAAA record) or a "cname" (CNAME record, which must be alone in its priority)
   # "proxied" and "cname" are supported by the Cloudflare provider only; all endpoints with the same priority must use the same "proxied"
   - recordName: "failover.example.com"
     provider: "example-provider-1"
@@ -61,6 +62,7 @@ domains:
         url: "https://tunnel-health.example.com/health"
         cname: "tunnel.example.com"
         proxied: true
+        # Backup, published only while the endpoints with priority 0 are unhealthy
         priority: 1
 
   # Dynamic DNS: the record follows the public IP address of the network ddup runs in.

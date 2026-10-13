@@ -124,12 +124,14 @@ You can find an example of the configuration file, and a description of every op
     - `cname`: A hostname to publish as a CNAME record when healthy (Cloudflare only). A CNAME can't coexist with other records, so an endpoint with `cname` must be the only one with its `priority`. Exactly one of `ip`, `cname` and `ipLookup` is required
     - `ipLookup`: Looks up the IP address to publish by calling a service that returns the caller's public IP address (like ipify). See [Dynamic DNS](#dynamic-dns). Exactly one of `ip`, `cname` and `ipLookup` is required
     - `proxied`: If true, the record is proxied by Cloudflare (Cloudflare only). Proxied records use Cloudflare's automatic TTL. All endpoints with the same `priority` must use the same value
-    - `priority`: Endpoints with a lower value are preferred (default: 0). See [Failover with priorities](#failover-with-priorities)
+    - `priority`: Optional non-negative integer for priority (default: 0). Only the healthy endpoints with the lowest priority value are published, and if none of them are healthy ddup falls back to the next value. When the preferred endpoints are healthy again (after `recoverAfter`, if set), ddup goes back to them. Endpoints with the same priority are all published together. If no endpoint is healthy, DNS is left unchanged. See [Failover with priorities](#failover-with-priorities)
     - `host`: Optional hostname to include in the requests, when the request is made to an IP address or to a hostname different from the desired one
 
 ### Failover with priorities
 
-By default every healthy endpoint is published (round-robin DNS). Give endpoints a `priority` to use some of them only as a fallback: ddup publishes just the healthy endpoints with the lowest priority value, and when none of those are healthy it publishes the next priority, going back as soon as the preferred ones recover (after `recoverAfter` successful checks, if set). Endpoints that are not published are still health-checked and shown as "standby" in the dashboard.
+By default every healthy endpoint is published (round-robin DNS). Give endpoints a `priority` to use some of them only as a fallback: ddup publishes just the healthy endpoints with the lowest priority value, and when none of those are healthy it publishes the next value, going back when the preferred ones are healthy again (after `recoverAfter` successful checks, if set). Endpoints with the same priority are published together. If no endpoint is healthy, DNS is left unchanged.
+
+Fork only: endpoints that are not published are still health-checked and shown as "standby" in the dashboard. Priorities also apply to `cname` and `ipLookup` endpoints. A `cname` endpoint must be alone in its priority, and endpoints with the same priority must use the same `proxied`.
 
 For example, with two VPS at priority 0 and a Cloudflare Tunnel as the fallback:
 
@@ -140,7 +142,7 @@ endpoints:
   - { name: tunnel, url: "https://tunnel-health.example.com/health", cname: "tunnel.example.com", proxied: true, priority: 1 }
 ```
 
-Both VPS IPs are published while they're healthy, a single IP if only one is, and the proxied CNAME if neither is. If nothing is healthy, ddup leaves DNS unchanged and sends the `all_unhealthy` webhook.
+Both VPS IPs are published while they're healthy, a single IP if only one is, and the proxied CNAME if neither is. If nothing is healthy, ddup also sends the `all_unhealthy` webhook.
 
 When the kind of record changes (A/AAAA to CNAME or the reverse), ddup overwrites an existing record in place so the name is never left without records. If Cloudflare rejects that, ddup falls back to deleting the record and creating the new one. Webhook events include `published`, `tier` and `previousTier`, and dns_updated emails say when the priority changed.
 

@@ -164,10 +164,11 @@ type ConfigEndpoint struct {
 	// All endpoints with the same priority must use the same value
 	Proxied bool `yaml:"proxied"`
 
-	// Priority of the endpoint; lower values are preferred
-	// Only the healthy endpoints with the lowest priority value are published, and when none are healthy ddup falls back to the next priority
-	// Endpoints with the same priority are all published together (round-robin)
-	// Defaults to 0
+	// Optional priority of the endpoint
+	// Only the healthy endpoints with the lowest priority value are published: if none of them are healthy, ddup falls back to the next priority
+	// Endpoints with the same priority are all published together
+	// Must be a non-negative integer
+	// +default 0
 	Priority int `yaml:"priority"`
 
 	// Hostname to include in the requests

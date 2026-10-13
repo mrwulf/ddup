@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os"
 	"reflect"
 	"regexp"
 	"slices"
@@ -112,12 +111,16 @@ type ConfigWebhook struct {
 	Method string `yaml:"method"`
 
 	// Additional headers to send
-	// Values are Go templates, rendered with the event, and can use !file and !envfile
+	// Values are Go templates, rendered with the event and the webhook's vars
 	Headers map[string]string `yaml:"headers"`
 
 	// Events that trigger this webhook; if empty, all events
 	// Valid values: dns_updated, dns_update_failed, all_unhealthy
 	Events []string `yaml:"events"`
+
+	// Values available to the header and body templates as .Vars, for example {{ .Vars.token }}
+	// Values can use !file and !envfile, so secrets can be used in templates without being written in the config file
+	Vars map[string]string `yaml:"vars"`
 
 	// Go template for the request body, rendered with the event
 	// If empty, the event is sent as JSON
@@ -602,14 +605,6 @@ var WebhookTemplateFuncs = template.FuncMap{
 	"json": func(v any) (string, error) {
 		b, err := json.Marshal(v)
 		return string(b), err
-	},
-	// env returns the value of an environment variable, and fails if it's not set
-	"env": func(name string) (string, error) {
-		val, ok := os.LookupEnv(name)
-		if !ok {
-			return "", fmt.Errorf("environment variable %s is not set", name)
-		}
-		return val, nil
 	},
 }
 

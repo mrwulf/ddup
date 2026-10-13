@@ -76,9 +76,7 @@ and re-sign the commits (they are unsigned).
 
 ## Fork-only on purpose
 
-- The `env` template function for webhook bodies and headers (`{{ env "NAME" }}`). Upstream's `!file` and `!envfile` read a whole
-  value, so they can't build something like `Bearer <token>` inside a template.
-  (`SecretString`, `!env` and `!file` are gone: the fork uses upstream's `!file` and `!envfile`, which cover the rest.)
+- Webhook `vars` (values for the templates, loaded with upstream's `!file` and `!envfile`), which replaced the fork's `env` template function. Issue pending.
 - The theme switcher (declined upstream, see #20).
 - CNAME targets, until there's agreement in issue [#24](https://github.com/ItalyPaleAle/ddup/issues/24).
 - `FORK.md`, its `screenshots/` (sample data only), and the README's screenshots and link to `FORK.md` (the README image replaced upstream's `screenshot.webp`, which this fork deleted). Keep them out of upstream PRs.

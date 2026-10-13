@@ -47,7 +47,7 @@ These are screenshots of a real Chrome window with seven tabs.
 
 - **Health check options.** `method`, `expectStatus` and `recoverAfter` (consecutive successes before an endpoint is added back).
 - **Webhooks.** Called on `dns_updated`, `dns_update_failed` and `all_unhealthy`, with templated headers and body, retries, and the domain's health status for templates (for example to set an ntfy tag). The sample config shows ntfy and an HTTP email API.
-- **Environment variables in webhook templates.** `{{ env "NAME" }}` in a webhook body or header, for secrets that can't be a whole value read with `!file` (upstream has `!file` and `!envfile` for the rest).
+- **Webhook `vars`.** Values for the templates of a webhook (`{{ .Vars.token }}`), loaded with upstream's `!file` and `!envfile`, for secrets that go inside a header or body template, such as `Bearer <token>` or the addresses of an email.
 
 ## Regenerating the screenshots
 

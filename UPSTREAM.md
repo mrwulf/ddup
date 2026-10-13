@@ -3,7 +3,7 @@
 This file is specific to this fork: it tracks what has been, and still has to be, submitted to
 [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup). It must not be part of any upstream PR.
 
-Last reviewed: 2026-10-12. Upstream `main` is `c5b47cf`: it includes #6, #9, #15, #16, #17 and #21, all squashed, plus go-kit 1.4.0 (`!file` and `!envfile` in the config, see #22) and the maintainer's `AGENTS.md`.
+Last reviewed: 2026-10-13. Upstream `main` is `c5b47cf`: it includes #6, #9, #15, #16, #17 and #21, all squashed, plus go-kit 1.4.0 (`!file` and `!envfile` in the config, see #22) and the maintainer's `AGENTS.md`.
 The maintainer plans a release once #18 and #19 are merged; features go in the release after that.
 This fork's `main` records upstream as merged (`git merge -s ours`), because upstream squashes and the histories
 differ. **Always branch from `upstream/main` and apply the listed changes**; never open a PR from this fork's
@@ -39,8 +39,8 @@ again with `-s ours`.
 | #15         | `UpdateRecords` reports whether anything changed | **Merged** |
 | #17         | Cache headers: stop caching the page and icon for 24h | **Merged** |
 | #21         | Health checks: open a new connection for every check (keep-alive made checks reuse one connection forever) | **Merged** (maintainer pushed a style-only "💄" commit, ported to the fork). Reminder to sign commits |
-| #18         | Overall status in the tab icon | **Open, waiting on the maintainer's pick.** They require shapes, not color alone (WCAG 1.4.1), so the badge is a check, a warning triangle and a cross, and asked for a less round "d". On 2026-10-12 we replied with four designs ("dd" and an up arrow, vertical "ddup", squared "d" with a flag, the round "d"); images are on the `pr-assets` branch. Once they pick: implement it on `pr/13-tab-icon-status` and on `main` (draw the text as paths, so it doesn't depend on installed fonts), signed |
-| #19         | Domain health counts as compact pills | **Open, waiting on the maintainer's pick.** On 2026-10-12 we replied with three responsive designs (A stepped pills, our pick; B segmented bar; C scaled-down cards), images on `pr-assets`. Once they pick: implement on `pr/14-summary-pills` and on `main`, signed |
+| #18         | Overall status in the tab icon | **Open, updated 2026-10-13.** The maintainer chose the round "d" with the shape badge (check, warning triangle, cross; a grey circle with a dash for unknown) and asked for an SVG of the icon without the badge, which is now `dashboard/public/favicon.svg`, and for the icon in the header, with its status. Done in `e80cb64` on `pr/13-tab-icon-status`, replied. The README screenshot is not changed in this PR, because #19 changes `screenshot.webp` and two PRs on one binary file would conflict: after both merge, check that `screenshot.webp` shows the header icon. Fork line: `feat/tab-icon-shapes` |
+| #19         | Domain health counts as compact pills | **Open, updated 2026-10-13.** The maintainer chose design B, a segmented bar under the search bar that gets smaller with the screen. Done in `a215e43` on `pr/14-summary-pills`, with a new README `screenshot.webp` in `f85c255`, replied. Fork line: `feat/summary-bar` |
 | #20         | Light/dark/system theme switcher | **Declined** (closed by the maintainer): causes theme flicker, and respecting the browser preference is the right choice. Fork-only, don't resubmit |
 | #8          | `!env` / `!file` secret references | **Declined**, then replaced by upstream's own `!file` and `!envfile` (go-kit 1.4.0, issue #22). The fork dropped `SecretString` and uses upstream's tags; `!env` no longer exists |
 | #7, #10, #11, #12, #13, #14 | The old stacked PRs | Closed by us, to keep reviews small. Replaced by the branches below |
@@ -71,7 +71,7 @@ and re-sign the commits (they are unsigned).
 
 | Issue | What |
 | :---- | :--- |
-| [#32](https://github.com/ItalyPaleAle/ddup/issues/32) | Optional `mise.toml` (or `make check`) that runs what CI runs; also asks about the missing `tools/gen-config` and a `v` in `AGENTS.md`'s install snippet |
+| [#32](https://github.com/ItalyPaleAle/ddup/issues/32) | Optional `mise.toml` (or `make check`) that runs what CI runs; also asks about the missing `tools/gen-config` and a `v` in `AGENTS.md`'s install snippet. Built and passing on branch `feat/mise` (from `upstream/main`, one signed commit), waiting for the issue to be agreed |
 
 ## Changes on `main` not covered by the above
 

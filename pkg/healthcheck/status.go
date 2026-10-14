@@ -13,9 +13,14 @@ type DomainStatus struct {
 }
 
 type DomainStatusEndpoint struct {
-	Healthy      bool   `json:"healthy"`
-	IP           string `json:"ip"`
-	FailureCount int    `json:"failureCount,omitempty"`
+	Healthy bool `json:"healthy"`
+	// What the endpoint publishes: its IP address, or its CNAME hostname
+	IP string `json:"ip"`
+	// Type of the DNS record for the endpoint: "A", "AAAA" or "CNAME"
+	Type string `json:"type,omitempty"`
+	// True if the record is proxied by the DNS provider
+	Proxied      bool `json:"proxied,omitempty"`
+	FailureCount int  `json:"failureCount,omitempty"`
 	// When the endpoint last changed state, from healthy to failing or the other way around
 	Since *time.Time `json:"since,omitempty"`
 	// True if `since` is when ddup first checked the endpoint, not a state change, so the real start is unknown
@@ -44,6 +49,7 @@ func (hc *HealthChecker) GetDomainStatus(domain string) *DomainStatus {
 
 func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 	healthy, unhealthy, lastUpdated, lastError := dc.getState()
+	targets := dc.getTargets()
 
 	// Endpoints in the unhealthy list could also be in the healthy one,
 	// if they failed a recent health check but still less than the max attempts
@@ -51,6 +57,8 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 		e := DomainStatusEndpoint{
 			Healthy:      isHealthy,
 			IP:           ip,
+			Type:         targets[ip].Type,
+			Proxied:      targets[ip].Proxied,
 			FailureCount: failureCount,
 		}
 		times := dc.getTimes(ip)

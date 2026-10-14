@@ -100,6 +100,7 @@ func TestHealthChecker_CNAMETier(t *testing.T) {
 				checker:    mc,
 				ttl:        60,
 				priorities: endpointPriorities(endpoints),
+				names:      endpointNames(endpoints),
 				failedIPs:  make(map[string]int),
 				provider:   provider,
 			},
@@ -148,13 +149,13 @@ func TestHealthChecker_CNAMETier(t *testing.T) {
 	assert.ElementsMatch(t, []dns.Target{vpsUS, vpsEU}, provider.LastTargets)
 	assert.Equal(t, 4, provider.CallCount)
 
-	// The status keeps the target in the "ip" field, and has the type and proxied flag
+	// The status keeps the target in the "ip" field, and has the name, the type and proxied flag, and which ones are published
 	status := hc.GetDomainStatus("example.com")
 	require.NotNil(t, status)
 	assert.ElementsMatch(t, []DomainStatusEndpoint{
-		{Healthy: true, IP: "192.0.2.10", Type: "A"},
-		{Healthy: true, IP: "192.0.2.11", Type: "A"},
-		{Healthy: true, IP: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true},
+		{Name: "vps-us", Healthy: true, Active: true, IP: "192.0.2.10", Type: "A"},
+		{Name: "vps-eu", Healthy: true, Active: true, IP: "192.0.2.11", Type: "A"},
+		{Name: "tunnel", Healthy: true, IP: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Priority: 1},
 	}, withoutTimes(status.Endpoints))
 }
 

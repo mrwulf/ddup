@@ -2,8 +2,13 @@ import { expect, test, type Locator, type Page, type Request } from '@playwright
 
 // Same shape as the response of the /api/status endpoint
 interface DomainStatusEndpoint {
+    name?: string
     healthy: boolean
     ip: string
+    type?: string
+    proxied?: boolean
+    priority?: number
+    active?: boolean
     failureCount?: number
     since?: string
     sinceStart?: boolean
@@ -20,6 +25,8 @@ interface DomainStatus {
 type DomainsResponse = Record<string, DomainStatus>
 
 const lastUpdated = '2026-01-02T03:04:05Z'
+
+const searchPlaceholder = 'Search domains, endpoints or IP addresses...'
 
 // One domain for each state the dashboard can show
 // Healthy: healthy.example, ipv6.example
@@ -140,9 +147,9 @@ const domainCard = (page: Page, name: string) =>
 const domainBadge = (page: Page, name: string) =>
     domainCard(page, name).locator('[data-slot="card-header"] [data-slot="badge"]')
 
-// The row of an endpoint is the closest element around the IP that includes the failure count
-const endpointRow = (card: Locator, ip: string) =>
-    card.getByText(ip, { exact: true }).locator('xpath=ancestor::div[contains(., "Failures:")][1]')
+// The row of an endpoint is the closest bordered box around its address
+const endpointRow = (card: Locator, address: string) =>
+    card.getByText(address, { exact: true }).locator('xpath=ancestor::div[contains(@class, "rounded-lg")][1]')
 
 // The count is the first span of a segment in the summary bar
 const summaryCount = (
@@ -203,15 +210,22 @@ test.describe('domain list', () => {
         await expect(card).toContainText('1/2 endpoints healthy')
         await expect(card).toContainText('Endpoints (2)')
 
+        // The state and the failures are shown as icons with a text for screen readers
         const healthyRow = endpointRow(card, '198.51.100.1')
         await expect(healthyRow).toContainText('Healthy')
-        await expect(healthyRow).toContainText('Failures: 0')
+        await expect(healthyRow).not.toContainText('consecutive failed')
         const unhealthyRow = endpointRow(card, '198.51.100.2')
         await expect(unhealthyRow).toContainText('Unhealthy')
-        await expect(unhealthyRow).toContainText('Failures: 3')
+        await expect(unhealthyRow).toContainText('3 consecutive failed checks')
 
         // Endpoints that are still healthy can have recent failures
-        await expect(endpointRow(domainCard(page, 'healthy.example'), '192.0.2.2')).toContainText('Failures: 1')
+        await expect(endpointRow(domainCard(page, 'healthy.example'), '192.0.2.2')).toContainText(
+            '1 consecutive failed check'
+        )
+
+        // Without different priorities, the priority and the standby state are not shown
+        await expect(card.getByTitle(/^Priority/)).toHaveCount(0)
+        await expect(card.getByTitle('Healthy, on standby')).toHaveCount(0)
 
         await expect(domainCard(page, 'dns-error.example')).toContainText('Domain Error')
         await expect(domainCard(page, 'dns-error.example')).toContainText('Error updating DNS records: boom')
@@ -226,7 +240,7 @@ test.describe('domain list', () => {
     })
 
     test('search filters by domain name', async ({ page }) => {
-        const search = page.getByPlaceholder('Search domains or IP addresses...')
+        const search = page.getByPlaceholder(searchPlaceholder)
 
         await search.fill('PARTIAL')
         await expect(cardTitles(page)).toHaveText(['partial.example'])
@@ -238,7 +252,7 @@ test.describe('domain list', () => {
     })
 
     test('search filters by endpoint IP', async ({ page }) => {
-        const search = page.getByPlaceholder('Search domains or IP addresses...')
+        const search = page.getByPlaceholder(searchPlaceholder)
 
         await search.fill('2001:DB8')
         await expect(cardTitles(page)).toHaveText(['ipv6.example'])
@@ -249,10 +263,133 @@ test.describe('domain list', () => {
     })
 
     test('search with no results shows a message', async ({ page }) => {
-        await page.getByPlaceholder('Search domains or IP addresses...').fill('nomatch')
+        await page.getByPlaceholder(searchPlaceholder).fill('nomatch')
         await expect(cardTitles(page)).toHaveCount(0)
         await expect(page.getByText('No domains or endpoints found matching "nomatch"')).toBeVisible()
         await expectSummary(page, 0, 0, 0)
+    })
+})
+
+const tieredDomains: DomainsResponse = {
+    'tiered.example': {
+        lastUpdated,
+        provider: 'cloudflare',
+        endpoints: [
+            { name: 'tunnel', healthy: true, ip: 'tunnel.example.com', type: 'CNAME', proxied: true, priority: 1 },
+            { name: 'us', healthy: true, ip: '192.0.2.10', type: 'A', priority: 0, active: true },
+            { name: 'eu', healthy: false, ip: '2001:db8::10', type: 'AAAA', priority: 0, failureCount: 4 },
+        ],
+    },
+}
+
+test.describe('endpoints', () => {
+    test.beforeEach(async ({ page }) => {
+        await mockStatus(page, tieredDomains)
+        await page.goto('/')
+        await expect(cardTitles(page)).toHaveText(['tiered.example'])
+    })
+
+    test('lists the endpoints by priority, with their name and address', async ({ page }) => {
+        const card = domainCard(page, 'tiered.example')
+        await expect(card).toContainText('Endpoints (3)')
+        await expect(card).toContainText('2/3 endpoints healthy')
+
+        // The published endpoint comes first within its priority, and the name is the main label
+        const names = card.locator('div.truncate.text-sm')
+        await expect(names).toHaveText(['us', 'eu', 'tunnel'])
+        await expect(endpointRow(card, '192.0.2.10')).toContainText('us')
+        await expect(endpointRow(card, '2001:db8::10')).toContainText('eu')
+        await expect(endpointRow(card, 'tunnel.example.com')).toContainText('tunnel')
+    })
+
+    test('shows the type, the priority and whether the endpoint is published', async ({ page }) => {
+        const card = domainCard(page, 'tiered.example')
+
+        const published = endpointRow(card, '192.0.2.10')
+        await expect(published.getByTitle('Priority 0')).toBeVisible()
+        await expect(published.getByTitle('Published in DNS')).toBeVisible()
+        await expect(published.getByTitle('CNAME record')).toHaveCount(0)
+
+        const failing = endpointRow(card, '2001:db8::10')
+        await expect(failing.getByTitle('Priority 0')).toBeVisible()
+        await expect(failing.getByTitle('4 consecutive failed checks')).toBeVisible()
+        // Only healthy endpoints can be published or on standby
+        await expect(failing.getByTitle('Published in DNS')).toHaveCount(0)
+        await expect(failing.getByTitle('Healthy, on standby')).toHaveCount(0)
+
+        const standby = endpointRow(card, 'tunnel.example.com')
+        await expect(standby.getByTitle('Priority 1')).toBeVisible()
+        await expect(standby.getByTitle('Healthy, on standby')).toBeVisible()
+        await expect(standby.getByTitle('CNAME record')).toBeVisible()
+        await expect(standby.getByTitle('Proxied by Cloudflare')).toBeVisible()
+    })
+
+    test('every state has an icon and a text, so none relies on color alone', async ({ page }) => {
+        const card = domainCard(page, 'tiered.example')
+        const rows = [
+            { address: '192.0.2.10', texts: ['Healthy', 'Priority 0', 'Published in DNS'] },
+            { address: '2001:db8::10', texts: ['Unhealthy', 'Priority 0', '4 consecutive failed checks'] },
+            {
+                address: 'tunnel.example.com',
+                texts: ['Healthy', 'Priority 1', 'Healthy, on standby', 'CNAME record', 'Proxied by Cloudflare'],
+            },
+        ]
+        for (const { address, texts } of rows) {
+            const row = endpointRow(card, address)
+            // Every svg is decoration: the same information is in text, visible or for screen readers
+            const icons = row.locator('svg')
+            expect(await icons.count()).toBeGreaterThan(0)
+            for (const hidden of await icons.evaluateAll((els) => els.map((el) => el.getAttribute('aria-hidden')))) {
+                expect(hidden).toBe('true')
+            }
+            for (const text of texts) {
+                await expect(row.getByText(text, { exact: true })).toHaveCount(1)
+            }
+        }
+    })
+
+    test('the failed checks are a warning triangle with the count', async ({ page }) => {
+        const chip = endpointRow(domainCard(page, 'tiered.example'), '2001:db8::10').getByTitle(
+            '4 consecutive failed checks'
+        )
+        await expect(chip).toHaveText(/^4/)
+        await expect(chip.locator('svg.lucide-triangle-alert, svg.lucide-alert-triangle')).toHaveCount(1)
+    })
+
+    test('the legend explains every icon', async ({ page }) => {
+        for (const text of [
+            'CNAME record',
+            'Proxied by Cloudflare',
+            'Priority n (lower is preferred)',
+            'Published in DNS',
+            'Healthy, on standby',
+            'Consecutive failed checks',
+        ]) {
+            await expect(page.getByText(text).last()).toBeVisible()
+        }
+    })
+
+    test('the legend is not shown when there is nothing to explain', async ({ page }) => {
+        await mockStatus(page, {})
+        await page.goto('/')
+        await expect(page.getByText('No domains configured or available')).toBeVisible()
+        await expect(page.getByText('Consecutive failed checks')).toHaveCount(0)
+    })
+
+    test('the History button stays on the line that counts the healthy endpoints', async ({ page }) => {
+        const card = domainCard(page, 'tiered.example')
+        const line = card.getByText('2/3 endpoints healthy').locator('xpath=..')
+        await expect(line.getByRole('button', { name: 'History of tiered.example' })).toBeVisible()
+    })
+
+    test('search matches the name of an endpoint', async ({ page }) => {
+        const search = page.getByPlaceholder(searchPlaceholder)
+
+        await search.fill('TUNNEL')
+        await expect(cardTitles(page)).toHaveText(['tiered.example'])
+
+        await search.fill('nomatch')
+        await expect(cardTitles(page)).toHaveCount(0)
     })
 })
 
@@ -474,7 +611,7 @@ test.describe('status icon', () => {
         await page.goto('/')
         await expect(cardTitles(page)).toHaveText(domainNames)
 
-        await page.getByPlaceholder('Search domains or IP addresses...').fill('healthy.example')
+        await page.getByPlaceholder(searchPlaceholder).fill('healthy.example')
         await expect(cardTitles(page)).toHaveText(['healthy.example'])
         await expectSummary(page, 1, 0, 0)
 
@@ -581,7 +718,7 @@ test.describe('endpoint history', () => {
         await historyButton(page, 'history.example').click()
         await expect(historyDialog(page, 'history.example')).toBeVisible()
 
-        const search = page.getByPlaceholder('Search domains or IP addresses...')
+        const search = page.getByPlaceholder(searchPlaceholder)
         await search.click()
         await expect(page.getByRole('dialog')).toHaveCount(0)
         await expect(search).toBeFocused()
@@ -718,8 +855,8 @@ test.describe('endpoint history', () => {
 
     test('the endpoint rows stay the same', async ({ page }) => {
         const card = domainCard(page, 'history.example')
-        await expect(endpointRow(card, '192.0.2.11')).toContainText('Failures: 3')
-        await expect(endpointRow(card, '192.0.2.10')).toContainText('Failures: 0')
+        await expect(endpointRow(card, '192.0.2.11')).toContainText('3 consecutive failed checks')
+        await expect(endpointRow(card, '192.0.2.10')).not.toContainText('consecutive failed')
         await expect(card).not.toContainText('since')
     })
 

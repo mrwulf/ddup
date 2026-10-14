@@ -26,6 +26,11 @@ type domainChecker struct {
 	// Priority of each endpoint, by IP
 	priorities map[string]int
 
+	// Name of each endpoint worth showing, by IP; empty for those with the default name
+	names map[string]string
+	// Name of the endpoints that look up their IP address, by the address they found
+	dynamicNames map[string]string
+
 	// Target published for each endpoint, by IP or CNAME hostname
 	targets map[string]dns.Target
 	// Priority of the endpoints that look up their IP address, by the address they found

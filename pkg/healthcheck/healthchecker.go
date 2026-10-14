@@ -60,6 +60,7 @@ func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.
 			checker:    checker.New(d.RecordName, d.Endpoints, d.HealthChecks, metrics, lookupers),
 			ttl:        d.TTL,
 			priorities: endpointPriorities(d.Endpoints),
+			names:      endpointNames(d.Endpoints),
 			failedIPs:  make(map[string]int, 0),
 			recovering: make(map[string]int, 0),
 			provider:   provider,
@@ -215,6 +216,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		dc.setRecovering(recovering)
 		dc.setTargets(targets)
 		dc.notePriorities(results, currentHealthyIPs, newHealthyIPs)
+		dc.noteNames(results, currentHealthyIPs, newHealthyIPs)
 
 		// Only the healthy endpoints with the lowest priority value are published
 		// The previous selection is derived from the previous healthy endpoints in the same way, so we only touch DNS when what's published changes

@@ -639,7 +639,7 @@ What changes with several replicas:
 
 The server has no authentication, so keep it on a trusted network. It exposes:
 
-- `GET /api/status` and `GET /api/status/{recordname}`: current status of the domains. Each endpoint has its `ip` (the IP address, or the hostname for an endpoint with `cname`), and the optional `type` of its DNS record (`A`, `AAAA` or `CNAME`) and `proxied` (only when it's true)
+- `GET /api/status` and `GET /api/status/{recordname}`: current status of the domains. Each endpoint has its `ip` (the IP address, or the hostname for an endpoint with `cname`), and the optional `name` (when the endpoint has one other than its URL), `type` of its DNS record (`A`, `AAAA` or `CNAME`), `proxied`, `priority`, `active` (the endpoint is published in DNS: it is healthy and has the lowest priority among the healthy endpoints) and `failureCount`. The last three are left out when they are false or 0
 - `POST /api/check`: runs health checks for all domains right away (the dashboard's "Check now" button), and returns the updated status. The request must include the header `X-Requested-By: ddup-dashboard`, which keeps other websites from triggering it through a visitor's browser. If a check finished less than 5 seconds ago, no new one is run. A forced check counts towards `attempts` and `recoverAfter` like a scheduled one, and the next scheduled check is then a full `interval` later
 - `GET /healthz`: returns 204 when the server is up
 

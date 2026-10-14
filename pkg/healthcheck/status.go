@@ -13,13 +13,19 @@ type DomainStatus struct {
 }
 
 type DomainStatusEndpoint struct {
-	Healthy bool `json:"healthy"`
+	// Name of the endpoint, if it was given one
+	Name    string `json:"name,omitempty"`
+	Healthy bool   `json:"healthy"`
 	// What the endpoint publishes: its IP address, or its CNAME hostname
 	IP string `json:"ip"`
 	// Type of the DNS record for the endpoint: "A", "AAAA" or "CNAME"
 	Type string `json:"type,omitempty"`
 	// True if the record is proxied by the DNS provider
-	Proxied      bool `json:"proxied,omitempty"`
+	Proxied bool `json:"proxied,omitempty"`
+	// Lower values are preferred: only the healthy endpoints with the lowest value are published
+	Priority int `json:"priority,omitempty"`
+	// True if the endpoint is published in DNS: it's healthy and has the lowest priority value among the healthy endpoints
+	Active       bool `json:"active,omitempty"`
 	FailureCount int  `json:"failureCount,omitempty"`
 	// When the endpoint last changed state, from healthy to failing or the other way around
 	Since *time.Time `json:"since,omitempty"`
@@ -50,13 +56,18 @@ func (hc *HealthChecker) GetDomainStatus(domain string) *DomainStatus {
 func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 	healthy, unhealthy, lastUpdated, lastError := dc.getState()
 	targets := dc.getTargets()
+	priorities := dc.getPriorities()
+	published := selectLowestPriority(priorities, healthy)
 
 	// Endpoints in the unhealthy list could also be in the healthy one,
 	// if they failed a recent health check but still less than the max attempts
 	newEndpoint := func(ip string, isHealthy bool, failureCount int) DomainStatusEndpoint {
 		e := DomainStatusEndpoint{
+			Name:         dc.getName(ip),
 			Healthy:      isHealthy,
 			IP:           ip,
+			Priority:     priorities[ip],
+			Active:       isHealthy && slices.Contains(published, ip),
 			Type:         targets[ip].Type,
 			Proxied:      targets[ip].Proxied,
 			FailureCount: failureCount,

@@ -45,7 +45,8 @@ func TestNewNotifyDetail(t *testing.T) {
 			Healthy:  true,
 		},
 		{
-			Endpoint: &config.ConfigEndpoint{Name: "secondary", IP: "192.0.2.11"},
+			// The default name is the URL of the health check, which is not a label
+			Endpoint: &config.ConfigEndpoint{Name: "https://192.0.2.11/health?token=abc123", URL: "https://192.0.2.11/health?token=abc123", IP: "192.0.2.11"},
 			Error:    errors.New("status code 503"),
 		},
 		{
@@ -65,6 +66,7 @@ func TestNewNotifyDetail(t *testing.T) {
 			"192.0.2.10": {
 				Priority: 0,
 				Active:   true,
+				Label:    "primary",
 			},
 			"192.0.2.11": {
 				Priority: 0,
@@ -72,6 +74,7 @@ func TestNewNotifyDetail(t *testing.T) {
 			},
 			"192.0.2.20": {
 				Priority: 1,
+				Label:    "backup",
 			},
 		},
 	}, d)

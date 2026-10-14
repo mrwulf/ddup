@@ -2,6 +2,7 @@ package notify
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,9 +26,9 @@ func detailEvent(typ config.NotificationEvent) Event {
 		Previous:  []string{"192.0.2.20"},
 		Detail: Detail{
 			Endpoints: map[string]EndpointDetail{
-				"192.0.2.10": {Priority: 0, Active: true},
-				"192.0.2.11": {Priority: 0, Error: "HTTP request failed: dial tcp 192.0.2.11:443: connect: connection refused"},
-				"192.0.2.20": {Priority: 1},
+				"192.0.2.10": {Priority: 0, Active: true, Label: "server1"},
+				"192.0.2.11": {Priority: 0, Error: "HTTP request failed: dial tcp 192.0.2.11:443: connect: connection refused", Label: "server2"},
+				"192.0.2.20": {Priority: 1, Label: "backup"},
 			},
 		},
 	}
@@ -42,8 +43,8 @@ func detailNotifier(t *testing.T, nc config.ConfigNotifications, deps dependenci
 func TestDetailMessage(t *testing.T) {
 	t.Run("dns_updated with tiers", func(t *testing.T) {
 		m := withDetail(newMessage(detailEvent(config.EventDNSUpdated)), detailEvent(config.EventDNSUpdated))
-		assert.Equal(t, "🟡 example.com now points to 192.0.2.10", m.title)
-		assert.Equal(t, "example.com now points to 192.0.2.10", m.ntfyTitle)
+		assert.Equal(t, "🟡 example.com now points to server1", m.title)
+		assert.Equal(t, "example.com now points to server1", m.ntfyTitle)
 		assert.Equal(t, []string{"yellow_circle"}, m.tags)
 		assert.Equal(t, `Event: dns_updated
 Domain: example.com
@@ -60,7 +61,7 @@ Endpoints:
 `, m.body)
 	})
 
-	t.Run("all_unhealthy with one tier", func(t *testing.T) {
+	t.Run("all_unhealthy with one tier and unnamed endpoints", func(t *testing.T) {
 		ev := Event{
 			Type:   config.EventAllUnhealthy,
 			Domain: "example.com",
@@ -85,8 +86,8 @@ Status: 🔴 unhealthy
 Unchanged: 192.0.2.10, 192.0.2.11
 
 Endpoints:
-  server1 (192.0.2.10): UNHEALTHY (status code 503)
-  server2 (192.0.2.11): UNHEALTHY
+  192.0.2.10: UNHEALTHY (status code 503)
+  192.0.2.11: UNHEALTHY
 `, m.body)
 	})
 
@@ -97,7 +98,7 @@ Endpoints:
 		assert.Equal(t, "🟢 example.com now points to 192.0.2.10, 192.0.2.11", m.title)
 		assert.Contains(t, m.body, "Status: 🟢 healthy\n")
 		assert.NotContains(t, m.body, "Priority:")
-		assert.Contains(t, m.body, "  server3 (192.0.2.12): healthy\n")
+		assert.Contains(t, m.body, "  192.0.2.12: healthy\n")
 	})
 
 	t.Run("disabled", func(t *testing.T) {
@@ -127,7 +128,7 @@ func TestDetailNtfy(t *testing.T) {
 	require.Len(t, reqs, 1)
 
 	// The tag shows the status before the title, so the title has no emoji
-	assert.Equal(t, "DNS update failed for example.com", reqs[0].Header.Get("Title"))
+	assert.Equal(t, "DNS update failed for example.com (wanted server1)", reqs[0].Header.Get("Title"))
 	assert.Equal(t, "yellow_circle,warning", reqs[0].Header.Get("Tags"))
 	assert.Equal(t, "4", reqs[0].Header.Get("Priority"))
 	assert.Contains(t, reqs[0].Body, "Status: 🟡 warning\n")
@@ -159,7 +160,7 @@ func TestDetailWebhook(t *testing.T) {
 	err := json.Unmarshal([]byte(reqs[0].Body), &parsed)
 	require.NoError(t, err)
 	ev := detailEvent(config.EventDNSUpdated)
-	assert.Equal(t, "🟡 example.com now points to 192.0.2.10\n\n"+detailBody(ev, ev.status()), parsed["text"])
+	assert.Equal(t, "🟡 example.com now points to server1\n\n"+detailBody(ev, ev.status()), parsed["text"])
 }
 
 func TestDetailEmail(t *testing.T) {
@@ -214,6 +215,151 @@ func TestDetailErrorsAreRedacted(t *testing.T) {
 
 	// The caller's detail is not changed
 	assert.Contains(t, shared["192.0.2.11"].Error, testCFToken)
+}
+
+func TestDetailTitle(t *testing.T) {
+	tests := []struct {
+		name   string
+		typ    config.NotificationEvent
+		labels map[string]string
+		expect string
+	}{
+		{
+			name:   "dns_updated with names",
+			typ:    config.EventDNSUpdated,
+			labels: map[string]string{"192.0.2.10": "server1", "192.0.2.11": "server2"},
+			expect: "🟢 example.com now points to server1, server2",
+		},
+		{
+			name:   "dns_updated with an unnamed endpoint",
+			typ:    config.EventDNSUpdated,
+			labels: map[string]string{"192.0.2.10": "server1"},
+			expect: "🟢 example.com now points to server1, 192.0.2.11",
+		},
+		{
+			name:   "dns_updated with endpoints sharing a name",
+			typ:    config.EventDNSUpdated,
+			labels: map[string]string{"192.0.2.10": "home", "192.0.2.11": "home"},
+			expect: "🟢 example.com now points to home",
+		},
+		{
+			name:   "dns_updated with a URL as name",
+			typ:    config.EventDNSUpdated,
+			labels: map[string]string{"192.0.2.10": "https://192.0.2.10/health?token=abc123", "192.0.2.11": "user:pass@host"},
+			expect: "🟢 example.com now points to 192.0.2.10, 192.0.2.11",
+		},
+		{
+			name:   "dns_update_failed",
+			typ:    config.EventDNSUpdateFailed,
+			labels: map[string]string{"192.0.2.10": "server1"},
+			expect: "🔴 DNS update failed for example.com (wanted server1, 192.0.2.11)",
+		},
+		{
+			name:   "all_unhealthy",
+			typ:    config.EventAllUnhealthy,
+			labels: map[string]string{"192.0.2.10": "server1"},
+			expect: "🔴 No healthy endpoints for example.com",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ev := Event{
+				Type:   tc.typ,
+				Domain: "example.com",
+				Time:   testTime,
+				Endpoints: []EndpointState{
+					{Name: "ignored", IP: "192.0.2.10", Healthy: true},
+					{Name: "ignored", IP: "192.0.2.11", Healthy: true},
+				},
+				Published: []string{"192.0.2.11", "192.0.2.10"},
+				Detail: Detail{
+					Endpoints: map[string]EndpointDetail{},
+				},
+			}
+			if tc.typ == config.EventDNSUpdateFailed {
+				ev.Error = "provider returned status 500"
+			}
+			for addr, label := range tc.labels {
+				ev.Detail.Endpoints[addr] = EndpointDetail{
+					Label: label,
+				}
+			}
+
+			m := withDetail(newMessage(ev), ev)
+			assert.Equal(t, tc.expect, m.title)
+			assert.NotContains(t, m.body, "ignored")
+		})
+	}
+}
+
+// An endpoint whose default name is its URL with a token never shows it, in any transport
+func TestDetailURLNameNeverSent(t *testing.T) {
+	const urlName = "https://192.0.2.10/health?token=abc123"
+
+	ts := newTestServer(t, nil)
+	fake := &fakeEmailer{}
+	n := detailNotifier(t, config.ConfigNotifications{
+		Ntfy: []config.ConfigNotificationNtfy{
+			{
+				Name:                       "alerts",
+				URL:                        ts.URL + "/ddup",
+				ConfigNotificationDelivery: fastDelivery(),
+			},
+		},
+		Webhooks: []config.ConfigNotificationWebhook{
+			{
+				Name:                       "chat",
+				Format:                     "plain",
+				URL:                        ts.URL + "/hook",
+				ConfigNotificationDelivery: fastDelivery(),
+			},
+		},
+		Email: []config.ConfigNotificationEmail{
+			{
+				Name:             "ops",
+				ConnectionString: "resend://" + testResendKey + "?fromAddress=ddup@example.com",
+				To:               []string{"postmaster@example.com"},
+			},
+		},
+	}, fakeEmailerDeps(fake, nil))
+
+	ev := Event{
+		Type:   config.EventDNSUpdated,
+		Domain: "example.com",
+		Time:   testTime,
+		Endpoints: []EndpointState{
+			{Name: urlName, IP: "192.0.2.10", Healthy: true},
+			{Name: "server2", IP: "192.0.2.11", Healthy: true},
+		},
+		Published: []string{"192.0.2.10", "192.0.2.11"},
+		Detail: Detail{
+			Endpoints: map[string]EndpointDetail{
+				"192.0.2.10": {Label: urlName, Active: true},
+				"192.0.2.11": {Label: "server2", Active: true},
+			},
+		},
+	}
+	n.Notify(ev)
+	shutdownNotifier(t, n)
+
+	reqs := ts.Requests()
+	require.Len(t, reqs, 2)
+	sent := fake.Sent()
+	require.Len(t, sent, 1)
+
+	for _, req := range reqs {
+		if req.Path == "/ddup" {
+			assert.Equal(t, "example.com now points to 192.0.2.10, server2", req.Header.Get("Title"))
+		} else {
+			assert.True(t, strings.HasPrefix(req.Body, "🟢 example.com now points to 192.0.2.10, server2\n\n"))
+		}
+		assert.NotContains(t, req.Body, "abc123")
+		assert.NotContains(t, req.Header.Get("Title"), "abc123")
+	}
+	assert.Equal(t, "🟢 example.com now points to 192.0.2.10, server2", sent[0].Subject)
+	assert.NotContains(t, sent[0].Message.Text, "abc123")
+	assert.Contains(t, sent[0].Message.Text, "  192.0.2.10: healthy\n")
 }
 
 func TestTruncateRunes(t *testing.T) {

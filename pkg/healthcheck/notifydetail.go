@@ -26,6 +26,7 @@ func newNotifyDetail(results []checker.Result, priorities map[string]int, publis
 			Priority: priorities[ip],
 			Active:   ip != "" && slices.Contains(published, ip),
 			Error:    checkErrorText(result.Error),
+			Label:    displayName(result.Endpoint),
 		}
 	}
 	return notify.Detail{

@@ -6,8 +6,10 @@ package notify
 // To drop it, delete this file and those call sites, see FORK.md
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,6 +35,9 @@ type EndpointDetail struct {
 	// Error of the latest check, if it failed
 	// The health checker removes URLs from it, and the notifier removes known secrets
 	Error string
+	// Name of the endpoint when it was set in the configuration, used in titles and in the list of endpoints
+	// Empty when the name is only the default, which can be the URL of the health check
+	Label string
 }
 
 // message returns the message for an event, with the details if they are enabled
@@ -44,7 +49,7 @@ func (n *Notifier) message(ev Event) message {
 	return withDetail(m, ev)
 }
 
-// redactDetail removes the secrets from the errors of the endpoints
+// redactDetail removes the secrets from the errors and the labels of the endpoints
 // It returns a copy, because the same detail can be shared by events that are still being delivered
 func (n *Notifier) redactDetail(d Detail) Detail {
 	if len(d.Endpoints) == 0 {
@@ -53,9 +58,7 @@ func (n *Notifier) redactDetail(d Detail) Detail {
 
 	clean := maps.Clone(d.Endpoints)
 	for addr, ep := range clean {
-		if ep.Error == "" {
-			continue
-		}
+		ep.Label = n.redact.String(ep.Label)
 		// Joined errors, like those of the IP lookups, span several lines
 		msg := strings.ReplaceAll(n.redact.String(ep.Error), "\n", "; ")
 		ep.Error = truncateRunes(msg, maxEndpointErrorLen)
@@ -66,14 +69,56 @@ func (n *Notifier) redactDetail(d Detail) Detail {
 	}
 }
 
-// withDetail adds the status emoji to the title, and replaces the body with the detailed one
+// withDetail replaces the title with one that names the endpoints and starts with the status emoji, and replaces the body with the detailed one
 // The ntfy title keeps no emoji, because ntfy shows the status tag before the title
 func withDetail(m message, ev Event) message {
 	status := ev.status()
-	m.ntfyTitle = m.title
-	m.title = statusEmoji(status) + " " + m.title
+	m.ntfyTitle = detailTitle(ev, m.title)
+	m.title = statusEmoji(status) + " " + m.ntfyTitle
 	m.body = detailBody(ev, status)
 	return m
+}
+
+// detailTitle returns the title of an event, with the names of the endpoints instead of their addresses
+// The other events keep the title of upstream, passed as fallback
+func detailTitle(ev Event, fallback string) string {
+	switch ev.Type {
+	case config.EventDNSUpdated:
+		return fmt.Sprintf("%s now points to %s", ev.Domain, strings.Join(ev.Detail.names(ev.Published), ", "))
+	case config.EventDNSUpdateFailed:
+		if len(ev.Published) == 0 {
+			return fallback
+		}
+		return fmt.Sprintf("DNS update failed for %s (wanted %s)", ev.Domain, strings.Join(ev.Detail.names(ev.Published), ", "))
+	case config.EventAllUnhealthy:
+		// Nothing is published, and every endpoint is down
+		return fallback
+	default:
+		return fallback
+	}
+}
+
+// names returns what to call the endpoints with the given addresses: their label, or the address for those without one
+// The addresses are sorted first, so the order is stable, and endpoints that share a name are listed once
+func (d Detail) names(addrs []string) []string {
+	sorted := slices.Clone(addrs)
+	slices.Sort(sorted)
+	res := make([]string, 0, len(sorted))
+	for _, addr := range sorted {
+		name := cmp.Or(safeLabel(d.Endpoints[addr].Label), addr)
+		if !slices.Contains(res, name) {
+			res = append(res, name)
+		}
+	}
+	return res
+}
+
+// safeLabel returns the label, or an empty string if it looks like a URL or has credentials, so it can never put one in a title
+func safeLabel(label string) string {
+	if strings.Contains(label, "://") || strings.Contains(label, "@") || strings.Contains(label, redacted) {
+		return ""
+	}
+	return label
 }
 
 // statusEmoji returns a green, yellow or red circle for the status of the domain, like the ntfy tags
@@ -136,6 +181,7 @@ func writeTierChange(b *strings.Builder, ev Event) {
 }
 
 func writeEndpoint(b *strings.Builder, ep EndpointState, d EndpointDetail, showPriority bool) {
+	label := safeLabel(d.Label)
 	state := "healthy"
 	switch {
 	case !ep.Healthy && d.Error != "":
@@ -147,11 +193,17 @@ func writeEndpoint(b *strings.Builder, ep EndpointState, d EndpointDetail, showP
 		state = "healthy (standby)"
 	}
 
-	if showPriority {
-		fmt.Fprintf(b, "  %s (%s, priority %d): %s\n", ep.Name, ep.IP, d.Priority, state)
-		return
+	// Endpoints without a label are shown by address, because their default name can be the URL of the health check
+	switch {
+	case label != "" && showPriority:
+		fmt.Fprintf(b, "  %s (%s, priority %d): %s\n", label, ep.IP, d.Priority, state)
+	case label != "":
+		fmt.Fprintf(b, "  %s (%s): %s\n", label, ep.IP, state)
+	case showPriority:
+		fmt.Fprintf(b, "  %s (priority %d): %s\n", ep.IP, d.Priority, state)
+	default:
+		fmt.Fprintf(b, "  %s: %s\n", ep.IP, state)
 	}
-	fmt.Fprintf(b, "  %s (%s): %s\n", ep.Name, ep.IP, state)
 }
 
 // tierCount returns the number of distinct priorities among the endpoints

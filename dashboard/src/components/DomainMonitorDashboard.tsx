@@ -13,9 +13,13 @@ import {
   Search,
   Play,
   ChevronDown,
+  Sun,
+  Moon,
+  Monitor,
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useTheme, type Theme } from '@/lib/theme'
 import { apiFetch, pageBuildInfo, type BuildInfo } from '@/lib/build'
 import { setFavicon } from '@/lib/favicon'
 import type { OverallStatus } from '@/lib/favicon-shapes'
@@ -75,6 +79,24 @@ const SummarySegment = ({
     <span className="sr-only text-[13px] font-medium text-muted-foreground sm:not-sr-only lg:text-sm">{label}</span>
   </div>
 )
+
+const themeOrder: Theme[] = ['system', 'light', 'dark']
+const themeIcons: Record<Theme, LucideIcon> = { system: Monitor, light: Sun, dark: Moon }
+
+// Icon button that cycles the theme: follow the system, light, dark
+// The label says the current theme and the next, so it does not rely on the icon alone
+const ThemeSwitcher = () => {
+  const { theme, setTheme } = useTheme()
+  const next = themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length]
+  const Icon = themeIcons[theme]
+  const label = `Theme: ${theme} (click for ${next})`
+
+  return (
+    <Button variant="outline" size="icon" onClick={() => setTheme(next)} title={label} aria-label={label}>
+      <Icon className="h-4 w-4" aria-hidden="true" />
+    </Button>
+  )
+}
 
 // The build that served the page, at the bottom of the page
 // The commit is left out when the build doesn't set it (a development build)
@@ -281,7 +303,7 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
               </div>
             )}
 
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {/* Split button: the main part toggles auto-refresh, the chevron opens a menu to refresh right away */}
               <div className="flex">
                 <Button
@@ -328,6 +350,8 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
                 <Play className={cn('h-4 w-4', isChecking && 'animate-pulse')} />
                 {isChecking ? 'Checking…' : 'Check now'}
               </Button>
+
+              <ThemeSwitcher />
             </div>
           </div>
         </div>

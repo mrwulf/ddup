@@ -39,6 +39,24 @@ The last button in the header cycles the theme between system, light and dark, a
 
 - **Leader election.** With `leaderElection.enabled`, several replicas run on Kubernetes: all of them check health, but only the one holding a Lease updates DNS and sends notifications. Standby replicas forward API requests to the leader, so every dashboard shows the leader's view, and answer with their own build header so a rolling update does not make the page reload. Upstream declined it ([#30](https://github.com/ItalyPaleAle/ddup/issues/30)): fork-only on purpose. The README describes what happens to notifications when the leader changes.
 
+## Detailed notifications
+
+The notifications of upstream PR [#40](https://github.com/ItalyPaleAle/ddup/pull/40) replaced the fork's webhook templates, and their messages lost what the fork used to send. `notifications.detail` (on by default here, `false` to turn it off) brings it back for ntfy, webhooks and email:
+
+- A green, yellow or red circle for the status of the domain in the title and in the `Status` line (ntfy keeps it in the tag only, so it isn't shown twice).
+- The error of the latest check of each unhealthy endpoint, without the endpoint's URL and with the configured secrets removed.
+- On domains with more than one priority, the priority of each endpoint, `healthy (standby)` for a healthy endpoint that is not published, and `Priority: <new> (was <old>)` when a `dns_updated` changes tier.
+
+The README shows an example under [Detailed messages](README.md#detailed-messages).
+Nothing changes in when notifications are sent: only the leader sends them, through the same queues.
+
+**How it is kept apart.** The code is in `pkg/notify/detail.go` and `pkg/healthcheck/notifydetail.go`, with their tests. Upstream files have one-line hooks only: the `Detail` field of `notify.Event`, the `ntfyTitle` of `message`, `Notifier.message` and `Notifier.redactDetail` in `notifier.go`, the `notifyDetail` field of `domainChecker` set in `healthchecker.go` and read in `HealthChecker.notify`, and the `Detail` setting of `ConfigNotifications` with its default in `GetDefaultConfig`. A configuration built in code (as in upstream's tests) has `Detail: false`, so upstream's message tests run unchanged.
+
+**How to drop it.** Delete those two files and their tests, then remove the hooks listed above.
+Configurations that set `detail` would then fail to load, because unknown keys are rejected.
+
+**Upstreaming.** A candidate once [#40](https://github.com/ItalyPaleAle/ddup/pull/40) is merged: the errors and the tiers are the most useful part, and upstream may prefer them without a setting.
+
 ## Regenerating the screenshots
 
 The images come from the dashboard's `dashboarddev` mode, which serves static data instead of running health checks (`cmd/ddup/main_dashboarddev.go`, which uses only example names and documentation addresses).

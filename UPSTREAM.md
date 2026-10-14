@@ -88,6 +88,7 @@ A test of "the fork as it would be if upstream merged all our open PRs as they a
 | Leader election and standby request forwarding | `pkg/leader`, `pkg/server/leaderproxy.go`, `leaderElection` | Declined (#30). Fork-only on purpose; every other feature must work with it off. Notifications are gated by `isLeader` too; a standby tracks outages without announcing them; the forwarded response carries the standby's own `X-Ddup-Build` |
 | Theme switcher (system, light, dark) | `dashboard/src/lib/theme.ts` | Declined (#20). Fork-only on purpose |
 | Endpoint rows: names, priority, published or standby, CNAME and proxied chips, failed-check chip, legend, ordered by priority; `name`, `priority` and `active` in the status API | dashboard, `pkg/healthcheck/status.go`, `endpointnames.go` | Issue [#27](https://github.com/ItalyPaleAle/ddup/issues/27), after #38 to #40. Not a PR yet |
+| Detailed notifications: status emoji, per-endpoint errors, priority tiers and `standby` | `pkg/notify/detail.go`, `pkg/healthcheck/notifydetail.go`, `notifications.detail` | Fork extension on top of #40, on by default. Candidate for upstreaming after #40 merges |
 | `FORK.md`, `screenshots/` (stale, see below), this file, the fork's README sections | | Fork-only on purpose |
 | The regression test of the deployed configuration | `pkg/config/testdata/deployment-like.yaml`, `pkg/healthcheck/deployment_test.go` | Fork-only; keep it passing |
 
@@ -103,7 +104,8 @@ A test of "the fork as it would be if upstream merged all our open PRs as they a
 
 ### Behaviors the fork loses or changes
 
-Intended (an upstream PR replaces them): templates, headers, custom method and the JSON catch-all receiver of the webhooks; email retries; the backoff (fixed `retryInterval`); the tier line, `standby`, per-endpoint error and status emoji in the text; ntfy priority urgent (5) for an outage; private destinations need `allowPrivateDestinations`; services of an IP lookup are raced, https only, no redirects, no proxy variables, no shared cache; `since` is a popover; the footer has no build date; `/api/info` is gone.
+Intended (an upstream PR replaces them): templates, headers, custom method and the JSON catch-all receiver of the webhooks; email retries; the backoff (fixed `retryInterval`); ntfy priority urgent (5) for an outage; private destinations need `allowPrivateDestinations`; services of an IP lookup are raced, https only, no redirects, no proxy variables, no shared cache; `since` is a popover; the footer has no build date; `/api/info` is gone.
+The tier line, `standby`, the per-endpoint errors and the status emoji were lost too, and came back as the fork extension `notifications.detail`.
 Also from upstream `main`, not from the open PRs: `expectStatus` is one code or `2xx` (the fork accepted a list, ranges and classes).
 Decisions for the user: endpoint names in notification titles (`0167787`; the titles list addresses now), a build date in the footer, a name in the History popover (it lists addresses), `IPv4 lookup` shown as the name of an unnamed lookup endpoint (the fork hid it), `priority` and `active` omitted from the status API when zero or false.
 

@@ -31,6 +31,8 @@ type Event struct {
 	// Error that caused the event, if any
 	// The notifier removes known secrets from it
 	Error string
+	// Fork extension: priorities, published flags and errors of the endpoints, see detail.go
+	Detail Detail
 }
 
 // EndpointState is the result of the latest health check for an endpoint

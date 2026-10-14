@@ -32,6 +32,8 @@ type Notifier struct {
 	senders []*sender
 	redact  *redactor
 	log     *slog.Logger
+	// Fork extension: send the detailed messages, see detail.go
+	detail bool
 
 	// Canceled to abort in-flight deliveries
 	cancel context.CancelFunc
@@ -88,6 +90,7 @@ func newNotifier(ctx context.Context, cfg *config.Config, deps dependencies) (*N
 	n := &Notifier{
 		senders: make([]*sender, 0, total),
 		log:     slog.Default(),
+		detail:  nc.Detail,
 	}
 
 	// Errors in events can include secrets from the DNS providers
@@ -265,6 +268,7 @@ func (n *Notifier) Notify(ev Event) {
 		ev.Time = time.Now()
 	}
 	ev.Error = n.redact.String(ev.Error)
+	ev.Detail = n.redactDetail(ev.Detail)
 
 	n.lock.RLock()
 	defer n.lock.RUnlock()
@@ -295,7 +299,7 @@ func (n *Notifier) run(ctx context.Context, s *sender) {
 			continue
 		}
 
-		err := s.send(ctx, newMessage(ev))
+		err := s.send(ctx, n.message(ev))
 		if err != nil {
 			n.log.ErrorContext(ctx, "Failed to send notification", "notification", s.name, "kind", s.kind, "event", ev.Type, "domain", ev.Domain, "error", err)
 			continue

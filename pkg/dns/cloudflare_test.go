@@ -47,7 +47,7 @@ func TestCloudflareProvider(t *testing.T) {
 		})
 
 		// Test creating records
-		res, err := provider.UpdateRecords(t.Context(), "example.com", 300, IPTargets("1.1.1.1"))
+		res, err := provider.UpdateRecords(t.Context(), "example.com", 300, testTargets("1.1.1.1"))
 		require.NoError(t, err)
 		assert.True(t, res.Changed)
 
@@ -122,7 +122,7 @@ func TestCloudflareProvider(t *testing.T) {
 		})
 
 		// Test deleting records (passing empty IPs array)
-		res, err := provider.UpdateRecords(t.Context(), "www.example.com", 300, IPTargets())
+		res, err := provider.UpdateRecords(t.Context(), "www.example.com", 300, testTargets())
 		require.NoError(t, err)
 		assert.True(t, res.Changed)
 
@@ -197,7 +197,7 @@ func TestCloudflareProvider(t *testing.T) {
 		})
 
 		// Test updating records with new IPs (keep 5.6.7.8, remove 1.2.3.4, add 9.10.11.12)
-		res, err := provider.UpdateRecords(t.Context(), "api.example.com", 300, IPTargets("5.6.7.8", "9.10.11.12"))
+		res, err := provider.UpdateRecords(t.Context(), "api.example.com", 300, testTargets("5.6.7.8", "9.10.11.12"))
 		require.NoError(t, err)
 		assert.True(t, res.Changed)
 
@@ -245,14 +245,14 @@ func TestCloudflareProvider(t *testing.T) {
 		setCloudflareEmptyAAAAAndCNAMEResponses(mockTransport, "api.example.com")
 
 		// Test updating with the same IP (no changes needed)
-		res, err := provider.UpdateRecords(t.Context(), "api.example.com", 300, IPTargets("1.2.3.4"))
+		res, err := provider.UpdateRecords(t.Context(), "api.example.com", 300, testTargets("1.2.3.4"))
 		require.NoError(t, err)
 		assert.False(t, res.Changed)
 		assert.Equal(t, []string{"1.2.3.4"}, res.Previous)
 
 		// Verify only the GET request was made (no DELETE or POST)
 		requests := mockTransport.GetRequests()
-		require.Len(t, requests, 3) // GET A, GET AAAA, GET CNAME
+		require.Len(t, requests, 3) // GET A, GET AAAA and GET CNAME
 	})
 
 	t.Run("Multiple IPs for domain", func(t *testing.T) {
@@ -288,7 +288,7 @@ func TestCloudflareProvider(t *testing.T) {
 		})
 
 		// Test creating multiple records for the same domain
-		_, err := provider.UpdateRecords(t.Context(), "multi.example.com", 300, IPTargets("1.1.1.1", "2.2.2.2"))
+		_, err := provider.UpdateRecords(t.Context(), "multi.example.com", 300, testTargets("1.1.1.1", "2.2.2.2"))
 		require.NoError(t, err)
 
 		// Verify the requests were made
@@ -335,7 +335,7 @@ func TestCloudflareProvider(t *testing.T) {
 		})
 
 		// Test that API errors are properly handled
-		_, err := provider.UpdateRecords(t.Context(), "error.example.com", 300, IPTargets("1.1.1.1"))
+		_, err := provider.UpdateRecords(t.Context(), "error.example.com", 300, testTargets("1.1.1.1"))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "API error")
 		assert.Contains(t, err.Error(), "1003")
@@ -353,7 +353,7 @@ func TestCloudflareProvider(t *testing.T) {
 		})
 
 		// Test that HTTP errors are handled (this will succeed in getting records but fail parsing the response)
-		_, err := provider.UpdateRecords(t.Context(), "http-error.example.com", 300, IPTargets("1.1.1.1"))
+		_, err := provider.UpdateRecords(t.Context(), "http-error.example.com", 300, testTargets("1.1.1.1"))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "API error")
 	})
@@ -419,26 +419,14 @@ func TestCloudflareProviderDeleteError(t *testing.T) {
 		Body:       `{"success":false}`,
 	})
 
-	_, err := provider.UpdateRecords(t.Context(), "www.example.com", 300, []Target{})
-	require.ErrorContains(t, err, "error deleting record record-456 for 1.2.3.4")
+	_, err := provider.UpdateRecords(t.Context(), "www.example.com", 300, testTargets())
+	require.ErrorContains(t, err, "error deleting record record-456 for A 1.2.3.4")
 	require.ErrorContains(t, err, "HTTP 500")
 }
 
 // newCloudflareTestProviderWithMock creates a test Cloudflare provider with a mock HTTP client
 func newCloudflareTestProviderWithMock() (*CloudflareProvider, *MockHTTPTransport) {
 	mockClient, mockTransport := NewMockHTTPClient()
-
-	// Unless a test sets CNAME records explicitly, there are none
-	mockTransport.Fallback = func(req *http.Request) *MockResponse {
-		if req.Method == http.MethodGet && req.URL.Query().Get("type") == "CNAME" {
-			return &MockResponse{
-				StatusCode: http.StatusOK,
-				Body:       `{"success":true,"errors":[],"result":[]}`,
-				Headers:    map[string]string{"Content-Type": "application/json"},
-			}
-		}
-		return nil
-	}
 
 	provider := &CloudflareProvider{
 		name:       "test",
@@ -450,21 +438,16 @@ func newCloudflareTestProviderWithMock() (*CloudflareProvider, *MockHTTPTranspor
 	return provider, mockTransport
 }
 
-// setCloudflareEmptyAAAAAndCNAMEResponses mocks no AAAA and no CNAME records for the domain
 func setCloudflareEmptyAAAAAndCNAMEResponses(mockTransport *MockHTTPTransport, domain string) {
-	setCloudflareRecordsResponse(mockTransport, domain, "AAAA", "")
-	setCloudflareRecordsResponse(mockTransport, domain, "CNAME", "")
-}
-
-// setCloudflareRecordsResponse mocks the records of the type returned for the domain; resultJSON is the content of the result array
-func setCloudflareRecordsResponse(mockTransport *MockHTTPTransport, domain string, recordType string, resultJSON string) {
-	mockTransport.SetResponse(
-		http.MethodGet,
-		"/client/v4/zones/test-zone-id/dns_records?name="+domain+"&type="+recordType,
-		&MockResponse{
-			StatusCode: http.StatusOK,
-			Body:       `{"success":true,"errors":[],"result":[` + resultJSON + `]}`,
-			Headers:    map[string]string{"Content-Type": "application/json"},
-		},
-	)
+	for _, recordType := range []string{"AAAA", "CNAME"} {
+		mockTransport.SetResponse(
+			http.MethodGet,
+			"/client/v4/zones/test-zone-id/dns_records?name="+domain+"&type="+recordType,
+			&MockResponse{
+				StatusCode: http.StatusOK,
+				Body:       `{"success":true,"errors":[],"result":[]}`,
+				Headers:    map[string]string{"Content-Type": "application/json"},
+			},
+		)
+	}
 }

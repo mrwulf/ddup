@@ -3,12 +3,14 @@ package checker
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/italypaleale/ddup/pkg/config"
+	"github.com/italypaleale/ddup/pkg/iplookup"
 	appmetrics "github.com/italypaleale/ddup/pkg/metrics"
 )
 
@@ -35,11 +37,14 @@ type checker struct {
 	cfg       config.ConfigHealthChecks
 	metrics   *appmetrics.AppMetrics
 	client    *http.Client
-	status    config.StatusMatcher
 
 	// Clients used for endpoints that set a custom host over TLS, keyed by host
-	hostClientsLock sync.Mutex
+	hostClientsLock sync.RWMutex
 	hostClients     map[string]*http.Client
+
+	// Looks up the IP address of each endpoint that sets `ipLookupFamily`
+	// Endpoints with the same list of services share a lookuper
+	lookupers map[*config.ConfigEndpoint]*iplookup.Lookuper
 
 	// Last IP address found for each endpoint that looks it up
 	lastIPsLock sync.Mutex
@@ -49,16 +54,17 @@ type checker struct {
 // Result represents the result of a health check
 type Result struct {
 	Endpoint *config.ConfigEndpoint
-	// What the endpoint publishes: an IP address or a CNAME hostname
-	// For endpoints that look up their IP address this is the address that was found, or the last one found if the lookup failed, and it's empty if there's none yet
-	Target   string
 	Healthy  bool
 	Error    error
 	Duration time.Duration
+	// IP address to publish for the endpoint, for endpoints that look up their IP address
+	// It's empty for other endpoints, and for those whose lookup has never worked
+	Target string
 }
 
 // New creates a new health checker
-func New(domain string, endpoints []*config.ConfigEndpoint, healthCheckConfig config.ConfigHealthChecks, metrics *appmetrics.AppMetrics) *checker {
+// The lookupers find the IP address of the endpoints that set `ipLookupFamily`, and can be nil if there are none
+func New(domain string, endpoints []*config.ConfigEndpoint, healthCheckConfig config.ConfigHealthChecks, metrics *appmetrics.AppMetrics, lookupers map[*config.ConfigEndpoint]*iplookup.Lookuper) *checker {
 	// Every check must open a new connection: with keep-alives, a connection that stays busy (checks run every few seconds) is reused forever, so the check keeps hitting the address it first resolved, even after DNS changes or the endpoint is replaced, and it can't notice problems with connecting or with the TLS handshake
 	transport := http.DefaultTransport.(*http.Transport).Clone() //nolint:forcetypeassert
 	transport.DisableKeepAlives = true
@@ -78,19 +84,13 @@ func New(domain string, endpoints []*config.ConfigEndpoint, healthCheckConfig co
 		healthCheckConfig.Attempts = DefaultAttempts
 	}
 
-	// Validation ensures the status specs are valid; if not, we fall back to the default
-	status, err := config.ParseStatusMatcher(healthCheckConfig.ExpectStatus)
-	if err != nil {
-		status = config.DefaultStatusMatcher()
-	}
-
 	return &checker{
 		domain:    domain,
 		endpoints: endpoints,
 		cfg:       healthCheckConfig,
 		metrics:   metrics,
 		client:    client,
-		status:    status,
+		lookupers: lookupers,
 	}
 }
 
@@ -130,16 +130,14 @@ func (c *checker) GetRecoverAfter() int {
 	return max(c.cfg.RecoverAfter, 1)
 }
 
-// checkEndpoint finds the target of the endpoint (looking up its IP address, if needed), and performs a health check on it
+// checkEndpoint finds the IP address of the endpoint (looking it up, if needed), and performs a health check on it
 func (c *checker) checkEndpoint(ctx context.Context, endpoint *config.ConfigEndpoint) Result {
 	if !endpoint.Dynamic() {
-		res := c.healthCheck(ctx, endpoint)
-		res.Target = endpoint.Target()
-		return res
+		return c.healthCheck(ctx, endpoint)
 	}
 
 	start := time.Now()
-	ip, err := lookupIP(ctx, endpoint.IPLookup, c.cfg.Timeout)
+	ip, err := c.lookupIP(ctx, endpoint)
 	if err != nil {
 		// Keep reporting the last IP address we found, so the failure counts against it like a failed health check
 		return Result{
@@ -153,7 +151,11 @@ func (c *checker) checkEndpoint(ctx context.Context, endpoint *config.ConfigEndp
 	c.setLastIP(endpoint, ip)
 
 	// Without a URL the endpoint is not health-checked, so it's healthy when the lookup works
-	res := Result{Endpoint: endpoint, Healthy: true, Duration: time.Since(start)}
+	res := Result{
+		Endpoint: endpoint,
+		Healthy:  true,
+		Duration: time.Since(start),
+	}
 	if endpoint.URL != "" {
 		res = c.healthCheck(ctx, endpoint)
 	}
@@ -161,15 +163,30 @@ func (c *checker) checkEndpoint(ctx context.Context, endpoint *config.ConfigEndp
 	return res
 }
 
+func (c *checker) lookupIP(ctx context.Context, endpoint *config.ConfigEndpoint) (string, error) {
+	lookuper := c.lookupers[endpoint]
+	if lookuper == nil {
+		return "", errors.New("IP lookup is not configured")
+	}
+
+	addr, err := lookuper.Lookup(ctx, endpoint.IPLookupFamily)
+	if err != nil {
+		return "", fmt.Errorf("looking up the IP address: %w", err)
+	}
+	return addr.String(), nil
+}
+
 func (c *checker) getLastIP(endpoint *config.ConfigEndpoint) string {
 	c.lastIPsLock.Lock()
 	defer c.lastIPsLock.Unlock()
+
 	return c.lastIPs[endpoint]
 }
 
 func (c *checker) setLastIP(endpoint *config.ConfigEndpoint, ip string) {
 	c.lastIPsLock.Lock()
 	defer c.lastIPsLock.Unlock()
+
 	if c.lastIPs == nil {
 		c.lastIPs = make(map[*config.ConfigEndpoint]string)
 	}
@@ -226,7 +243,7 @@ func (c *checker) healthCheck(ctx context.Context, endpoint *config.ConfigEndpoi
 	_ = resp.Body.Close() //nolint:errcheck
 
 	// Check if status code indicates health
-	if !c.status.Match(resp.StatusCode) {
+	if !c.cfg.StatusMatches(resp.StatusCode) {
 		return Result{
 			Endpoint: endpoint,
 			Healthy:  false,
@@ -246,10 +263,19 @@ func (c *checker) healthCheck(ctx context.Context, endpoint *config.ConfigEndpoi
 // clientForHost returns an HTTP client that sends the given host as SNI in TLS handshakes
 // Clients are created once per host and shared, and the base client is never modified, so this is safe for concurrent use
 func (c *checker) clientForHost(host string) *http.Client {
+	// Most calls find an existing client, so check with a read lock first
+	c.hostClientsLock.RLock()
+	client := c.hostClients[host]
+	c.hostClientsLock.RUnlock()
+	if client != nil {
+		return client
+	}
+
 	c.hostClientsLock.Lock()
 	defer c.hostClientsLock.Unlock()
 
-	client := c.hostClients[host]
+	// Check again, as another goroutine may have created the client while we waited for the write lock
+	client = c.hostClients[host]
 	if client != nil {
 		return client
 	}

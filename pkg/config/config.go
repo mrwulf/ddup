@@ -5,15 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
-	"text/template"
 	"time"
+
+	"github.com/italypaleale/ddup/pkg/iplookup"
 )
 
 // Config represents the application configuration
@@ -25,8 +27,16 @@ type Config struct {
 	// Domains allows configuring multiple domains, each with its own endpoints
 	Domains []ConfigDomain `yaml:"domains"`
 
+	// List of services used to look up the public IP address of the endpoints that set `ipLookupFamily` and don't have a list of their own
+	// There are no built-in services: ddup contacts only the services that are configured
+	// The services are called over HTTPS: those that apply to an endpoint are asked at the same time, and the first valid answer is used
+	IPLookupURLs []ConfigIPLookupURL `yaml:"ipLookupURLs"` //nolint:tagliatelle // The key keeps the URLs initialism
+
 	// Provider contains shared provider configuration (shared across all domains)
 	Providers map[string]ConfigProvider `yaml:"providers"`
+
+	// Notifications configures the notifications sent when the DNS records of a domain change or when it has no healthy endpoints
+	Notifications ConfigNotifications `yaml:"notifications"`
 
 	// Logs contains configuration for logging
 	Logs ConfigLogs `yaml:"logs"`
@@ -34,11 +44,8 @@ type Config struct {
 	// Server contains configuration for the server
 	Server ConfigServer `yaml:"server"`
 
-	// LeaderElection lets multiple replicas run together: all of them check health, only the leader updates DNS and sends webhooks
+	// LeaderElection lets multiple replicas run together: all of them check health, only the leader updates DNS and sends notifications
 	LeaderElection ConfigLeaderElection `yaml:"leaderElection"`
-
-	// Webhooks are called when events occur (e.g. DNS records updated, no healthy endpoints)
-	Webhooks []ConfigWebhook `yaml:"webhooks"`
 
 	// Dev is meant for development only; it's undocumented
 	Dev ConfigDev `yaml:"-"`
@@ -50,7 +57,6 @@ type Config struct {
 // ConfigDomain represents a single domain and its endpoints
 type ConfigDomain struct {
 	// RecordName is the DNS record to update for this domain (e.g., "app.example.com")
-	// Can use !file and !envfile
 	// +required
 	RecordName string `yaml:"recordName"`
 
@@ -85,54 +91,34 @@ type ConfigHealthChecks struct {
 	// Defaults to 1
 	RecoverAfter int `yaml:"recoverAfter"`
 
-	// HTTP method for the health check request
+	// HTTP method for the health check request: GET or HEAD
 	// Defaults to GET
 	Method string `yaml:"method"`
 
-	// HTTP status codes that indicate a healthy endpoint
-	// Each item is a code ("200"), an inclusive range ("200-299") or a class ("2xx")
-	// Defaults to ["2xx"]
-	ExpectStatus []string `yaml:"expectStatus"`
+	// HTTP status code that indicates a healthy endpoint: either an exact code (like "204") or "2xx" for any 2xx code
+	// Defaults to "2xx"
+	ExpectStatus string `yaml:"expectStatus"`
 }
 
-// ConfigWebhook represents a webhook called when events occur
-type ConfigWebhook struct {
-	// Webhook name, used for logging purposes
-	// Defaults to the URL host
-	Name string `yaml:"name"`
+// StatusMatches returns true if the HTTP status code indicates a healthy endpoint
+// The value of ExpectStatus must have been validated
+func (c ConfigHealthChecks) StatusMatches(code int) bool {
+	if c.ExpectStatus == "" || c.ExpectStatus == "2xx" {
+		return code >= 200 && code <= 299
+	}
+	expected, _ := strconv.Atoi(c.ExpectStatus)
+	return code == expected
+}
 
-	// URL to call
-	// Can use !file and !envfile
-	// +required
-	URL string `yaml:"url"`
-
-	// HTTP method
-	// Defaults to POST
-	Method string `yaml:"method"`
-
-	// Additional headers to send
-	// Values are Go templates, rendered with the event and the webhook's vars
-	Headers map[string]string `yaml:"headers"`
-
-	// Events that trigger this webhook; if empty, all events
-	// Valid values: dns_updated, dns_update_failed, all_unhealthy
-	Events []string `yaml:"events"`
-
-	// Values available to the header and body templates as .Vars, for example {{ .Vars.token }}
-	// Values can use !file and !envfile, so secrets can be used in templates without being written in the config file
-	Vars map[string]string `yaml:"vars"`
-
-	// Go template for the request body, rendered with the event
-	// If empty, the event is sent as JSON
-	Body string `yaml:"body"`
-
-	// Request timeout for each attempt
-	// Defaults to 10s
-	Timeout time.Duration `yaml:"timeout"`
-
-	// Maximum number of delivery attempts, with exponential backoff starting at 2s
-	// Defaults to 5
-	Attempts int `yaml:"attempts"`
+func validateExpectStatus(v string) error {
+	if v == "" || v == "2xx" {
+		return nil
+	}
+	code, err := strconv.Atoi(v)
+	if err != nil || code < 100 || code > 599 {
+		return fmt.Errorf("expectStatus must be a status code (like 204) or 2xx, got %q", v)
+	}
+	return nil
 }
 
 // ConfigEndpoint represents a single endpoint to health check
@@ -142,27 +128,30 @@ type ConfigEndpoint struct {
 	Name string `yaml:"name"`
 
 	// Health check URL
-	// Required, unless the endpoint uses `ipLookup`: then the endpoint is not health-checked, and is healthy as long as the IP address can be looked up
+	// Required, unless the endpoint sets `ipLookupFamily`: then the endpoint is not health-checked, and is healthy as long as its IP address can be looked up
 	URL string `yaml:"url"`
 
 	// IP address to include in DNS records when healthy
-	// IPv4 addresses create A records and IPv6 addresses create AAAA records
-	// Exactly one of `ip`, `cname` and `ipLookup` is required
+	// IPv4 addresses are published as A records and IPv6 addresses as AAAA records
+	// Exactly one of `ip`, `cname` and `ipLookupFamily` is required
 	IP string `yaml:"ip"`
 
-	// Looks up the IP address to publish by calling a service that returns the caller's public IP address, like ipify
-	// This is for dynamic DNS: the record follows the public IP address of the network ddup runs in
-	// Exactly one of `ip`, `cname` and `ipLookup` is required
-	IPLookup *ConfigIPLookup `yaml:"ipLookup"`
-
-	// Hostname to publish as a CNAME record when healthy
-	// A CNAME record can't coexist with other records, so an endpoint with a `cname` must be alone in its priority
-	// Exactly one of `ip`, `cname` and `ipLookup` is required
+	// Hostname to publish in a CNAME record when healthy
+	// A CNAME record can't coexist with other records, so an endpoint with `cname` must be the only one with its priority
+	// Only supported by some DNS providers
+	// Exactly one of `ip`, `cname` and `ipLookupFamily` is required
 	CNAME string `yaml:"cname"`
 
-	// If true, the record is proxied by the DNS provider (Cloudflare only)
-	// All endpoints with the same priority must use the same value
-	Proxied bool `yaml:"proxied"`
+	// IP version of the public IP address to look up and include in DNS records when healthy: 4 creates an A record, 6 an AAAA record
+	// This is for dynamic DNS: the record follows the public IP address of the network ddup runs in
+	// Exactly one of `ip`, `cname` and `ipLookupFamily` is required
+	IPLookupFamily int `yaml:"ipLookupFamily"`
+
+	// Optional list of services used to look up the IP address of this endpoint, with one or more entries
+	// It replaces the top-level `ipLookupURLs` for this endpoint: the two lists are not merged
+	// It can only be set together with `ipLookupFamily`, and the `family` of its entries is optional but, if set, must match `ipLookupFamily`
+	// If not set, the entries of the top-level `ipLookupURLs` with the family of the endpoint are used
+	IPLookupURLs []ConfigIPLookupURL `yaml:"ipLookupURLs"` //nolint:tagliatelle // The key keeps the URLs initialism
 
 	// Optional priority of the endpoint
 	// Only the healthy endpoints with the lowest priority value are published: if none of them are healthy, ddup falls back to the next priority
@@ -174,18 +163,60 @@ type ConfigEndpoint struct {
 	// Hostname to include in the requests
 	// This can be used when the request is made to an IP address or to a hostname different from the desired one
 	Host string `yaml:"host"`
+
+	// Options that apply only when the domain uses a specific DNS provider
+	ProviderOptions ConfigEndpointProviderOptions `yaml:"providerOptions"`
 }
 
-// ConfigIPLookup configures how an endpoint's IP address is looked up
-type ConfigIPLookup struct {
-	// URLs of services that return the caller's IP address; they are tried in order, and the first that works is used
+// ConfigEndpointProviderOptions contains the options for an endpoint that are specific to a DNS provider
+// Each key can be used only when the domain's provider is the one it is named after
+type ConfigEndpointProviderOptions struct {
+	// Options for the Cloudflare provider
+	Cloudflare *ConfigEndpointCloudflareOptions `yaml:"cloudflare"`
+}
+
+// ConfigEndpointCloudflareOptions contains the options for an endpoint that apply to the Cloudflare provider
+type ConfigEndpointCloudflareOptions struct {
+	// If true, the record is proxied by Cloudflare
+	// Works with both `ip` and `cname`
+	// All endpoints with the same priority must use the same value, because the records published together are either all proxied or all DNS-only
+	// +default false
+	Proxied bool `yaml:"proxied"`
+}
+
+// Keys returns the keys of the options that are set, which are named after the DNS providers they are for
+func (o ConfigEndpointProviderOptions) Keys() []string {
+	var keys []string
+	if o.Cloudflare != nil {
+		keys = append(keys, "cloudflare")
+	}
+	return keys
+}
+
+// Proxied returns true if the records for this endpoint should be proxied by the DNS provider
+func (e *ConfigEndpoint) Proxied() bool {
+	return e.ProviderOptions.Cloudflare != nil && e.ProviderOptions.Cloudflare.Proxied
+}
+
+// Target returns what the endpoint publishes in DNS, which is its IP address or its CNAME hostname
+// It is unique among the endpoints of a domain
+func (e *ConfigEndpoint) Target() string {
+	if e.CNAME != "" {
+		return e.CNAME
+	}
+	return e.IP
+}
+
+// ConfigIPLookupURL is a service that returns the public IP address of the caller
+type ConfigIPLookupURL struct {
+	// URL of the service, which must use https
 	// By default the response body is expected to contain only the IP address, as plain text
 	// +required
-	URLs []string `yaml:"urls"`
+	URL string `yaml:"url"`
 
-	// Expected IP version, 4 or 6; a response with the other version is an error
-	// This is how you choose between an A and an AAAA record, as the service you call decides which version it sees
-	// If empty, any version is accepted
+	// IP version the service answers for: 4 or 6
+	// Required in the top-level `ipLookupURLs`, which serves both versions
+	// Optional on an endpoint, where it's the `ipLookupFamily` of the endpoint: if set, it must be equal to it
 	Family int `yaml:"family"`
 
 	// Optional regular expression with exactly one capture group, to extract the IP address from the response (for example from JSON)
@@ -195,16 +226,44 @@ type ConfigIPLookup struct {
 
 // Dynamic returns true if the IP address of the endpoint is looked up
 func (e *ConfigEndpoint) Dynamic() bool {
-	return e.IPLookup != nil
+	return e.IPLookupFamily != 0
 }
 
-// Target returns what the endpoint publishes in DNS: its IP address, or its CNAME hostname
-// It's empty for endpoints that look up their IP address, as it's not known until the lookup runs
-func (e *ConfigEndpoint) Target() string {
-	if e.CNAME != "" {
-		return e.CNAME
+// IPLookupSources returns the services used to look up the IP address of an endpoint that sets `ipLookupFamily`
+// These are the services in the list of the endpoint, if it has one, or otherwise those in the top-level list with the family of the endpoint
+// The configuration must have been validated
+func (c *Config) IPLookupSources(e *ConfigEndpoint) ([]iplookup.Source, error) {
+	var (
+		entries  []ConfigIPLookupURL
+		location string
+	)
+	if e.IPLookupURLs != nil {
+		entries = e.IPLookupURLs
+		location = "the ipLookupURLs of the endpoint"
+	} else {
+		for _, u := range c.IPLookupURLs {
+			if u.Family == e.IPLookupFamily {
+				entries = append(entries, u)
+			}
+		}
+		location = "ipLookupURLs"
 	}
-	return e.IP
+
+	res := make([]iplookup.Source, len(entries))
+	for i, u := range entries {
+		res[i] = iplookup.Source{
+			URL:    u.URL,
+			Family: e.IPLookupFamily,
+		}
+		if u.Pattern != "" {
+			re, err := regexp.Compile(u.Pattern)
+			if err != nil {
+				return nil, fmt.Errorf("entry %d in %s has an invalid pattern: %w", i, location, err)
+			}
+			res[i].Pattern = re
+		}
+	}
+	return res, nil
 }
 
 type ConfigProvider struct {
@@ -389,6 +448,11 @@ func (c *Config) Validate(logger *slog.Logger) error {
 		return errors.New("no domains configured; specify at least one domain under 'domains'")
 	}
 
+	err := c.validateIPLookupURLs()
+	if err != nil {
+		return err
+	}
+
 	// Validate domains
 	for di := range c.Domains {
 		// Use a pointer so that defaults and sanitization are persisted
@@ -421,27 +485,50 @@ func (c *Config) Validate(logger *slog.Logger) error {
 		default:
 			return fmt.Errorf("domain %s is invalid: healthChecks.method must be GET or HEAD", d.RecordName)
 		}
-		_, err := ParseStatusMatcher(d.HealthChecks.ExpectStatus)
+		err = validateExpectStatus(d.HealthChecks.ExpectStatus)
 		if err != nil {
-			return fmt.Errorf("domain %s is invalid: healthChecks.expectStatus: %w", d.RecordName, err)
+			return fmt.Errorf("domain %s is invalid: healthChecks.%w", d.RecordName, err)
 		}
 		if d.HealthChecks.RecoverAfter < 0 {
 			return fmt.Errorf("domain %s is invalid: healthChecks.recoverAfter must not be negative", d.RecordName)
 		}
 
 		// Validate endpoints for this domain
-		err = c.validateEndpoints(d)
+		for ei, v := range d.Endpoints {
+			err = v.validateTarget(d.RecordName, c.ipLookupFamilies())
+			if err != nil {
+				return fmt.Errorf("domain %s endpoint %d is invalid: %w", d.RecordName, ei, err)
+			}
+			// Endpoints that look up their address can skip the health check
+			if v.URL == "" && !v.Dynamic() {
+				return fmt.Errorf("domain %s endpoint %d is invalid: URL is empty", d.RecordName, ei)
+			}
+			if v.Priority < 0 {
+				return fmt.Errorf("domain %s endpoint %d is invalid: priority must not be negative", d.RecordName, ei)
+			}
+			if v.Name == "" {
+				v.Name = v.defaultName()
+			}
+		}
+
+		err = validateDomainEndpoints(d)
 		if err != nil {
 			return err
 		}
 	}
 
-	err := c.validateLeaderElection()
+	err = c.validateLeaderElection()
 	if err != nil {
 		return err
 	}
 
-	return c.validateWebhooks()
+	// Validate the notifications
+	err = c.Notifications.validate()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (c *Config) validateLeaderElection() error {
@@ -474,143 +561,200 @@ func (c *Config) validateLeaderElection() error {
 	return nil
 }
 
-func (c *Config) validateEndpoints(d *ConfigDomain) error {
-	// Features only the Cloudflare provider supports
-	cloudflare := c.Providers[d.Provider].Cloudflare != nil
+// Options that set what an endpoint publishes, of which exactly one is required
+var endpointTargetOptions = []string{"ip", "cname", "ipLookupFamily"}
 
-	targets := make(map[string]struct{}, len(d.Endpoints))
-	type tier struct {
+// joinOptions lists option names for a message, like "ip, cname or ipLookupFamily"
+func joinOptions(options []string) string {
+	last := len(options) - 1
+	return strings.Join(options[:last], ", ") + " or " + options[last]
+}
+
+// validateTarget checks what the endpoint publishes, and sanitizes it
+func (e *ConfigEndpoint) validateTarget(recordName string, families map[int]bool) error {
+	var count int
+	for _, set := range []bool{e.IP != "", e.CNAME != "", e.Dynamic()} {
+		if set {
+			count++
+		}
+	}
+	if count != 1 {
+		return fmt.Errorf("exactly one of %s must be set", joinOptions(endpointTargetOptions))
+	}
+
+	if !e.Dynamic() && e.IPLookupURLs != nil {
+		return errors.New("ipLookupURLs is set, but the endpoint has no ipLookupFamily: the services are only used to look up an address, not with a fixed ip or a cname")
+	}
+
+	switch {
+	case e.Dynamic():
+		return e.validateLookupServices(families)
+	case e.IP != "":
+		ip, err := netip.ParseAddr(e.IP)
+		if err != nil {
+			return fmt.Errorf("IP %q is not a valid IPv4 or IPv6 address", e.IP)
+		}
+		e.IP = ip.String()
+	case e.CNAME != "":
+		cname, err := normalizeHostname(e.CNAME)
+		if err != nil {
+			return fmt.Errorf("cname %w", err)
+		}
+		if cname == normalizeRecordName(recordName) {
+			return fmt.Errorf("cname %q is the domain's own record name", cname)
+		}
+		e.CNAME = cname
+	}
+
+	return nil
+}
+
+// validateDomainEndpoints checks the rules that involve all the endpoints of a domain
+// It must be called after each endpoint has been validated
+func validateDomainEndpoints(d *ConfigDomain) error {
+	type priorityGroup struct {
 		count   int
 		cname   bool
 		proxied bool
 	}
-	tiers := make(map[int]*tier)
+	groups := make(map[int]*priorityGroup, len(d.Endpoints))
+	targets := make(map[string]int, len(d.Endpoints))
 
-	for ei, v := range d.Endpoints {
-		if v.URL == "" && !v.Dynamic() {
-			return fmt.Errorf("domain %s endpoint %d is invalid: URL is empty", d.RecordName, ei)
-		}
-		var kinds int
-		for _, set := range []bool{v.IP != "", v.CNAME != "", v.Dynamic()} {
-			if set {
-				kinds++
-			}
-		}
-		if kinds == 0 {
-			return fmt.Errorf("domain %s endpoint %d is invalid: one of ip, cname and ipLookup is required", d.RecordName, ei)
-		}
-		if kinds > 1 {
-			return fmt.Errorf("domain %s endpoint %d is invalid: ip, cname and ipLookup are mutually exclusive", d.RecordName, ei)
-		}
-		if v.Dynamic() {
-			err := v.IPLookup.validate()
-			if err != nil {
-				return fmt.Errorf("domain %s endpoint %d is invalid: ipLookup %w", d.RecordName, ei, err)
-			}
-		}
-		if v.Priority < 0 {
-			return fmt.Errorf("domain %s endpoint %d is invalid: priority must not be negative", d.RecordName, ei)
-		}
-
-		if v.IP != "" {
-			ip, err := netip.ParseAddr(v.IP)
-			if err != nil {
-				return fmt.Errorf("domain %s endpoint %d is invalid: IP %q is not a valid IPv4 or IPv6 address", d.RecordName, ei, v.IP)
-			}
-			v.IP = ip.String()
-		} else if v.CNAME != "" {
-			cname, err := normalizeHostname(v.CNAME)
-			if err != nil {
-				return fmt.Errorf("domain %s endpoint %d is invalid: cname %w", d.RecordName, ei, err)
-			}
-			v.CNAME = cname
-		}
-
-		if (v.CNAME != "" || v.Proxied) && !cloudflare {
-			return fmt.Errorf("domain %s endpoint %d is invalid: cname and proxied are only supported by the Cloudflare provider", d.RecordName, ei)
-		}
-
-		// The target of endpoints that look up their IP address is not known yet
-		if !v.Dynamic() {
-			_, dup := targets[v.Target()]
+	for ei, e := range d.Endpoints {
+		// The address of a dynamic endpoint isn't known until it is looked up
+		if !e.Dynamic() {
+			prev, dup := targets[e.Target()]
 			if dup {
-				return fmt.Errorf("domain %s endpoint %d is invalid: %s is used by more than one endpoint", d.RecordName, ei, v.Target())
+				return fmt.Errorf("domain %s endpoint %d is invalid: %s is already used by endpoint %d", d.RecordName, ei, e.Target(), prev)
 			}
-			targets[v.Target()] = struct{}{}
+			targets[e.Target()] = ei
 		}
 
-		if v.Name == "" {
-			v.Name = v.URL
-			if v.Name == "" {
-				// Lookup URLs can carry a token in the query string or userinfo, so only the non-secret parts are used in names
-				v.Name = RedactURL(v.IPLookup.URLs[0])
-			}
+		g := groups[e.Priority]
+		if g == nil {
+			g = &priorityGroup{proxied: e.Proxied()}
+			groups[e.Priority] = g
 		}
+		g.count++
+		g.cname = g.cname || e.CNAME != ""
 
-		t := tiers[v.Priority]
-		if t == nil {
-			t = &tier{proxied: v.Proxied}
-			tiers[v.Priority] = t
-		}
-		t.count++
-		t.cname = t.cname || v.CNAME != ""
-		if t.proxied != v.Proxied {
-			return fmt.Errorf("domain %s endpoint %d is invalid: endpoints with priority %d must all have the same value for proxied", d.RecordName, ei, v.Priority)
+		// A set of records is either all proxied or all DNS-only
+		if g.proxied != e.Proxied() {
+			return fmt.Errorf("domain %s endpoint %d is invalid: endpoints with priority %d must all use the same value for providerOptions.cloudflare.proxied", d.RecordName, ei, e.Priority)
 		}
 	}
 
-	for priority, t := range tiers {
-		if t.cname && t.count > 1 {
-			return fmt.Errorf("domain %s is invalid: priority %d has a cname endpoint and other endpoints, but a CNAME record can't coexist with other records; give the cname endpoint its own priority", d.RecordName, priority)
+	for _, priority := range slices.Sorted(maps.Keys(groups)) {
+		g := groups[priority]
+		if g.cname && g.count > 1 {
+			return fmt.Errorf("domain %s is invalid: priority %d has an endpoint with cname and other endpoints, but a CNAME record can't coexist with other records; give the endpoint with cname its own priority", d.RecordName, priority)
 		}
 	}
 
 	return nil
 }
 
-func (l *ConfigIPLookup) validate() error {
-	if len(l.URLs) == 0 {
-		return errors.New("requires at least one URL")
+// validateLookupServices checks that an endpoint with `ipLookupFamily` has at least one service to ask
+func (e *ConfigEndpoint) validateLookupServices(families map[int]bool) error {
+	if e.IPLookupFamily != 4 && e.IPLookupFamily != 6 {
+		return fmt.Errorf("ipLookupFamily must be 4 or 6, got %d", e.IPLookupFamily)
 	}
-	for _, raw := range l.URLs {
-		u, err := url.Parse(raw)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return fmt.Errorf("URL %q is not an absolute http(s) URL", raw)
+
+	if e.IPLookupURLs == nil {
+		if !families[e.IPLookupFamily] {
+			return fmt.Errorf("ipLookupFamily is %[1]d, but no service is configured for it: set ipLookupURLs on the endpoint, or add an entry with family %[1]d to the top-level ipLookupURLs", e.IPLookupFamily)
 		}
+		return nil
 	}
-	if l.Family != 0 && l.Family != 4 && l.Family != 6 {
-		return errors.New("family must be 4 or 6")
+
+	if len(e.IPLookupURLs) == 0 {
+		return errors.New("ipLookupURLs is empty: add at least one service, or remove the key to use the top-level ipLookupURLs")
 	}
-	if l.Pattern != "" {
-		re, err := regexp.Compile(l.Pattern)
+	return validateIPLookupURLList(e.IPLookupURLs, e.IPLookupFamily)
+}
+
+// defaultName returns the name of an endpoint that doesn't set one
+func (e *ConfigEndpoint) defaultName() string {
+	if e.URL != "" {
+		return e.URL
+	}
+	return fmt.Sprintf("IPv%d lookup", e.IPLookupFamily)
+}
+
+// ipLookupFamilies returns the IP versions that have at least one service in the top-level list
+func (c *Config) ipLookupFamilies() map[int]bool {
+	res := make(map[int]bool, 2)
+	for _, u := range c.IPLookupURLs {
+		res[u.Family] = true
+	}
+	return res
+}
+
+// validateIPLookupURLs validates the top-level list of services used for IP lookups
+func (c *Config) validateIPLookupURLs() error {
+	return validateIPLookupURLList(c.IPLookupURLs, 0)
+}
+
+// validateIPLookupURLList validates a list of services
+// The family is the `ipLookupFamily` of the endpoint the list belongs to, or 0 for the top-level list, where each entry must set its own
+func validateIPLookupURLList(list []ConfigIPLookupURL, family int) error {
+	type key struct {
+		url    string
+		family int
+	}
+	seen := make(map[key]struct{}, len(list))
+
+	for i, u := range list {
+		// The URL can contain a token, so it's never part of an error message
+		if u.URL == "" {
+			return fmt.Errorf("ipLookupURLs[%d] is invalid: url is empty", i)
+		}
+		err := iplookup.ValidateURL(u.URL)
 		if err != nil {
-			return fmt.Errorf("pattern is invalid: %w", err)
+			return fmt.Errorf("ipLookupURLs[%d] is invalid: url %w", i, err)
 		}
-		if re.NumSubexp() != 1 {
-			return errors.New("pattern must have exactly one capture group")
-		}
-	}
-	return nil
-}
 
-// RedactURL removes the userinfo, query string and fragment of a URL, as they can contain secrets
-// It's meant for logs and display names; a value that isn't a valid URL is replaced entirely
-func RedactURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return "(invalid URL)"
+		entryFamily := u.Family
+		switch {
+		case family == 0 && u.Family != 4 && u.Family != 6:
+			return fmt.Errorf("ipLookupURLs[%d] (%s) is invalid: family must be 4 or 6, got %d", i, iplookup.RedactURL(u.URL), u.Family)
+		case family != 0 && u.Family == 0:
+			entryFamily = family
+		case family != 0 && u.Family != family:
+			return fmt.Errorf("ipLookupURLs[%d] (%s) is invalid: family is %d, but the endpoint has ipLookupFamily %d; an endpoint looks up one IP version, so IPv4 and IPv6 services can't be mixed in its list", i, iplookup.RedactURL(u.URL), u.Family, family)
+		}
+
+		if u.Pattern != "" {
+			re, err := regexp.Compile(u.Pattern)
+			if err != nil {
+				return fmt.Errorf("ipLookupURLs[%d] (%s) is invalid: pattern is not a valid regular expression: %w", i, iplookup.RedactURL(u.URL), err)
+			}
+			if re.NumSubexp() != 1 {
+				return fmt.Errorf("ipLookupURLs[%d] (%s) is invalid: pattern must have exactly one capture group", i, iplookup.RedactURL(u.URL))
+			}
+		}
+
+		k := key{url: u.URL, family: entryFamily}
+		_, dup := seen[k]
+		if dup {
+			return fmt.Errorf("ipLookupURLs[%d] (%s) is invalid: the same url and family are already in the list", i, iplookup.RedactURL(u.URL))
+		}
+		seen[k] = struct{}{}
 	}
-	u.User = nil
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String()
+
+	return nil
 }
 
 var hostnameLabelRegexp = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
 
+// normalizeRecordName lowercases a record name and removes the trailing dot
+func normalizeRecordName(name string) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")
+}
+
 // normalizeHostname lowercases a hostname, removes the trailing dot, and checks that it's valid and isn't an IP address
 func normalizeHostname(name string) (string, error) {
-	name = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")
+	name = normalizeRecordName(name)
 	if name == "" || len(name) > 253 {
 		return "", fmt.Errorf("%q is not a valid hostname", name)
 	}
@@ -624,58 +768,6 @@ func normalizeHostname(name string) (string, error) {
 		}
 	}
 	return name, nil
-}
-
-// WebhookTemplateFuncs are the functions available in webhook body and header templates
-var WebhookTemplateFuncs = template.FuncMap{
-	"join": strings.Join,
-	"json": func(v any) (string, error) {
-		b, err := json.Marshal(v)
-		return string(b), err
-	},
-}
-
-// WebhookEvents is the list of valid webhook event names
-var WebhookEvents = []string{"dns_updated", "dns_update_failed", "all_unhealthy"}
-
-func (c *Config) validateWebhooks() error {
-	for i := range c.Webhooks {
-		w := &c.Webhooks[i]
-		u, err := url.Parse(w.URL)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return fmt.Errorf("webhook %d is invalid: url must be an absolute http(s) URL", i)
-		}
-		if w.Name == "" {
-			w.Name = u.Host
-		}
-		w.Method = strings.ToUpper(w.Method)
-		if w.Method == "" {
-			w.Method = http.MethodPost
-		}
-		if w.Timeout <= 0 {
-			w.Timeout = 10 * time.Second
-		}
-		if w.Attempts <= 0 {
-			w.Attempts = 5
-		}
-		for _, ev := range w.Events {
-			if !slices.Contains(WebhookEvents, ev) {
-				return fmt.Errorf("webhook %q is invalid: unknown event %q (valid: %s)", w.Name, ev, strings.Join(WebhookEvents, ", "))
-			}
-		}
-		// Templates are parsed again at runtime; this catches syntax errors early
-		_, err = template.New("body").Funcs(WebhookTemplateFuncs).Parse(w.Body)
-		if err != nil {
-			return fmt.Errorf("webhook %q is invalid: body template: %w", w.Name, err)
-		}
-		for k, v := range w.Headers {
-			_, err = template.New(k).Funcs(WebhookTemplateFuncs).Parse(v)
-			if err != nil {
-				return fmt.Errorf("webhook %q is invalid: header %q template: %w", w.Name, k, err)
-			}
-		}
-	}
-	return nil
 }
 
 func countSetProperties(s any) int {

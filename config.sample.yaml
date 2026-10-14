@@ -13,10 +13,10 @@ domains:
       attempts: 3
       # Consecutive successes needed to re-add an endpoint that was removed (default 1)
       recoverAfter: 3
-      # Request method, GET (default) or HEAD
+      # Request method: GET (default) or HEAD
       method: "HEAD"
-      # Status codes that mean healthy: codes, ranges or classes (default ["2xx"])
-      expectStatus: ["200", "418"]
+      # Status code that means healthy: an exact code or "2xx" (default "2xx")
+      expectStatus: "204"
     endpoints:
       - name: "server1"
         url: "http://192.168.1.100:8080/health"
@@ -38,107 +38,130 @@ domains:
       - name: "foo2"
         url: "http://192.168.1.201:9000/health"
         ip: "192.168.1.201"
-
-  # Endpoints have priority 0 by default, and lower values are preferred
-  # DNS only contains the healthy endpoints with the lowest priority value
-  # Endpoints with the same priority are published together
-  # An endpoint publishes either an "ip" (A/AAAA record) or a "cname" (CNAME record, which must be alone in its priority)
-  # "proxied" and "cname" are supported by the Cloudflare provider only; all endpoints with the same priority must use the same "proxied"
-  - recordName: "failover.example.com"
+  - recordName: "app.example.com"
     provider: "example-provider-1"
-    ttl: 60
-    healthChecks:
-      timeout: "5s"
-      attempts: 3
-      recoverAfter: 3
+    ttl: 120
     endpoints:
-      - name: "vps-us"
-        url: "https://vps-us.example.com/health"
+      # Endpoints have priority 0 by default, and lower values are preferred
+      # DNS only contains the healthy endpoints with the lowest priority value
+      - name: "primary"
+        url: "http://192.168.1.50:8080/health"
+        ip: "192.168.1.50"
+      # Backup, published only while "primary" is unhealthy
+      - name: "backup"
+        url: "http://203.0.113.10:8080/health"
+        ip: "203.0.113.10"
+        priority: 1
+  - recordName: "tunnel.example.com"
+    provider: "example-provider-1"
+    ttl: 120
+    endpoints:
+      - name: "vps"
+        url: "http://192.0.2.10:8080/health"
         ip: "192.0.2.10"
-      - name: "vps-eu"
-        url: "https://vps-eu.example.com/health"
-        ip: "192.0.2.20"
+      # Last resort when "vps" is unhealthy, published as a CNAME record
+      # A CNAME record can't coexist with other records, so this endpoint is alone in its priority
+      # The health check goes through its own url
       - name: "tunnel"
         url: "https://tunnel-health.example.com/health"
-        cname: "tunnel.example.com"
-        proxied: true
-        # Backup, published only while the endpoints with priority 0 are unhealthy
+        cname: "0a1b2c3d.cfargotunnel.com"
         priority: 1
+        # Options for a specific provider, which must be the one used by the domain
+        # All endpoints with the same priority must use the same value for proxied
+        providerOptions:
+          cloudflare:
+            # Cloudflare proxies the record (default false)
+            proxied: true
 
-  # Dynamic DNS: the record follows the public IP address of the network ddup runs in.
+  # Dynamic DNS: the record follows the public IP address of the network ddup runs in
   # With no "url" the endpoint isn't health-checked; it's healthy while the lookup works
+  # ddup has no built-in lookup service: the services are set in "ipLookupURLs", either at the top level (below) or on the endpoint
   - recordName: "home.example.com"
     provider: "example-provider-1"
     ttl: 300
     endpoints:
       - name: "home"
-        ipLookup:
-          # Tried in order; the first that works is used
-          urls:
-            - "https://api.ipify.org"
-            - "https://ipv4.icanhazip.com"
-          # 4 or 6: a response with the other version is an error. Use "pattern" for responses that aren't just the IP address
-          family: 4
+        # 4 creates an A record, 6 an AAAA record. Use this instead of "ip"
+        # This endpoint has no "ipLookupURLs" of its own, so it uses the entries with family 4 in the top-level list
+        ipLookupFamily: 4
+
+  # An endpoint can have its own list of services, with one or more entries
+  # The list replaces the top-level one for this endpoint (the two are not merged)
+  - recordName: "office.example.com"
+    provider: "example-provider-1"
+    ttl: 300
+    endpoints:
+      - name: "office"
+        ipLookupFamily: 4
+        # All the services in the list are asked at the same time and the first valid answer is used
+        # A warning is logged if the others return a different address
+        # With one entry, only that service is asked
+        ipLookupURLs:
+          # "family" is optional here; if set, it must be equal to ipLookupFamily
+          - url: "https://ip.example.com/v4"
+          # "pattern" is for services that don't return just the address: a regular expression with one capture group
+          - url: "https://ip2.example.com/json"
+            pattern: '"ip":\s*"([^"]+)"'
+
+# Services used to look up the public IP address of the endpoints that have "ipLookupFamily" and no "ipLookupURLs" of their own
+# ddup has no built-in services and contacts none that is not configured; the services see the public address of your network
+# Each family used by an endpoint needs at least one entry. "family" (4 or 6) is required here, and URLs must use https
+# The entries for the same family are asked at the same time and the first valid answer is used
+ipLookupURLs:
+  - url: "https://whatismyip.akamai.com"
+    family: 4
+  - url: "https://api.ipify.org"
+    family: 4
+  - url: "https://api6.ipify.org"
+    family: 6
 
 # Provider Configuration
-# Any string setting can read secrets from a file instead of the config file:
-#   apiToken: !file /run/secrets/cloudflare-token
-#   apiToken: !envfile /run/secrets/ddup.env CLOUDFLARE_API_TOKEN
-# ddup fails at startup if the file or variable is missing. In webhooks, use "vars" for secrets that go inside a template
 providers:
   example-provider-1:
     cloudflare:
       apiToken: "your-cloudflare-api-token"
       zoneId: "your-zone-id"
 
-# Webhooks called on events: dns_updated, dns_update_failed, all_unhealthy (default: all)
-# Failed deliveries are retried with exponential backoff
-# Without "body", the event is sent as JSON. Otherwise body and header values are Go templates
-# with fields .Type .Domain .Time .Status .Healthy .Previous .Endpoints .Error, methods .Subject, .Text, .StatusTag (a ntfy tag) and .StatusEmoji, and funcs join and json
-# "vars" are values for the templates, available as .Vars; they can use !file and !envfile, so secrets don't need to be in this file
-webhooks:
-  - name: "ntfy"
-    url: "https://ntfy.example.com/ddup"
-    events: ["dns_updated", "all_unhealthy"]
-    headers:
-      Title: "ddup: {{ .Subject }}"
-      # A green, yellow or red circle for the health of the domain (healthy, warning or unhealthy), shown before the title
-      Tags: "{{ .StatusTag }}"
-      # Urgent when nothing is healthy
-      Priority: '{{ if eq .Status "unhealthy" }}high{{ else }}default{{ end }}'
-    body: "Healthy: {{ join .Healthy \", \" }}"
-    attempts: 5
-    timeout: "10s"
-  # Email through any HTTP email API; this example uses Resend (https://resend.com/docs/api-reference/emails/send-email)
-  # Mailgun, Postmark, SendGrid and similar work the same way: change the url, auth header and JSON fields
-  # Using "json" makes sure values are correctly escaped in the JSON body
-  - name: "email"
-    url: "https://api.resend.com/emails"
-    events: ["dns_updated", "dns_update_failed", "all_unhealthy"]
-    vars:
-      apiKey: !file /run/secrets/email-api-key
-      from: "ddup@example.com"
-      to: !file /run/secrets/email-to
-    headers:
-      Authorization: "Bearer {{ .Vars.apiKey }}"
-      Content-Type: "application/json"
-    body: '{"from": {{ json .Vars.from }}, "to": [{{ json .Vars.to }}], "subject": {{ json (printf "[ddup] %s" .Subject) }}, "text": {{ json .Text }}}'
-  # Alternative: Cloudflare Email Service (needs an account entitled to Email Sending; see the README). Replace the entry above with:
-  # - name: "email"
-  #   url: "https://api.cloudflare.com/client/v4/accounts/your-account-id/email/sending/send"
-  #   events: ["dns_updated", "dns_update_failed", "all_unhealthy"]
-  #   headers:
-  #     Authorization: "Bearer your-api-token"   # token with Account > Email Sending > Edit
-  #     Content-Type: "application/json"
-  #   body: '{"from": "ddup@example.com", "to": "postmaster@example.com", "subject": {{ json (printf "[ddup] %s" .Subject) }}, "text": {{ json .Text }}}'
-  - name: "audit"
-    url: "https://hooks.example.com/ddup"
+# Notifications (optional)
+# URLs, tokens and connection strings are secrets: instead of writing them here, read them from files, as in `token: !file /run/secrets/ntfy-token`
+# Every notification has an optional "events" list, with any of: dns_updated, dns_update_failed, all_unhealthy (default: all of them)
+notifications:
+  # ntfy topics
+  ntfy:
+    - name: "alerts"
+      # URL of the topic, including the topic name
+      url: "https://ntfy.example.com/ddup"
+      # Optional access token
+      token: "your-ntfy-token"
+      events: ["dns_updated", "dns_update_failed", "all_unhealthy"]
+      # Allow sending to private addresses, such as a ntfy server in your LAN or cluster (default: false)
+      allowPrivateDestinations: true
+      # Optional delivery settings. Defaults: timeout 20s, maxAttempts 3 (including the first), retryInterval 20s
+      timeout: "10s"
+      maxAttempts: 3
+      retryInterval: "20s"
+  # Webhooks, with the format "plain" (default), "slack", or "discord"
+  webhooks:
+    - name: "chat"
+      format: "slack"
+      url: "https://hooks.slack.com/services/your-webhook-path"
+      events: ["dns_update_failed", "all_unhealthy"]
+  # Email
+  email:
+    - name: "ops"
+      # Connection string for Resend, SMTP (smtp://user:password@host:587?fromAddress=...&tls=starttls), AWS SES, SendGrid, or console://
+      connectionString: "resend://your-resend-api-key?fromAddress=ddup@example.com&fromName=ddup"
+      # One email is sent to each recipient
+      to: ["postmaster@example.com"]
+      events: ["dns_update_failed", "all_unhealthy"]
 
-# Run more than one replica (Kubernetes only). All replicas check health, but only the leader updates DNS and sends webhooks.
-# A Lease named "name" decides the leader. Standby replicas forward API requests to the leader, so the dashboard shows the leader's view.
-# Forwarding needs the identity to be the pod's IP address: set POD_IP from the downward API (status.podIP).
-# Namespace defaults to the pod's, identity to $POD_IP, then $POD_NAME, then the hostname.
-# The pod's service account needs get, create and update on the Lease.
+# Run more than one replica (Kubernetes only)
+# All replicas check health, but only the leader updates DNS and sends notifications
+# A Lease named "name" decides the leader
+# Standby replicas forward API requests to the leader, so the dashboard shows the leader's view
+# Forwarding needs the identity to be the pod's IP address: set POD_IP from the downward API (status.podIP)
+# Namespace defaults to the pod's, identity to $POD_IP, then $POD_NAME, then the hostname
+# The pod's service account needs get, create and update on the Lease
 leaderElection:
   enabled: false
   name: ddup

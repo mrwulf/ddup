@@ -16,10 +16,12 @@ type MockProvider struct {
 	NoChange bool
 	// IPs reported as previously in DNS
 	Previous []string
-	// IPs passed to the last call of UpdateRecords
+	// Values of the targets passed to the last call of UpdateRecords
 	LastIPs []string
-	// Targets passed to the last UpdateRecords call
+	// Targets passed to the last call of UpdateRecords
 	LastTargets []Target
+	// Capabilities reported by the provider
+	ProviderCapabilities Capabilities
 }
 
 // NewMockProvider creates a new MockProvider.
@@ -30,6 +32,11 @@ func NewMockProvider(shouldError bool) *MockProvider {
 // Name implements the Provider interface.
 func (m *MockProvider) Name() string {
 	return "mock"
+}
+
+// Capabilities implements the Provider interface.
+func (m *MockProvider) Capabilities() Capabilities {
+	return m.ProviderCapabilities
 }
 
 // UpdateRecords implements the Provider interface.

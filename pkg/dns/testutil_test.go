@@ -11,8 +11,6 @@ import (
 type MockHTTPTransport struct {
 	responses map[string]*MockResponse
 	requests  []*http.Request
-	// Optional; used for requests that don't have a response set explicitly
-	Fallback func(req *http.Request) *MockResponse
 }
 
 // MockResponse represents a mock HTTP response
@@ -49,10 +47,6 @@ func (m *MockHTTPTransport) RoundTrip(req *http.Request) (*http.Response, error)
 
 	// Look for a matching response
 	response, exists := m.responses[key]
-	if !exists && m.Fallback != nil {
-		response = m.Fallback(req)
-		exists = response != nil
-	}
 	if !exists {
 		response = &MockResponse{
 			StatusCode: 404,
@@ -95,4 +89,18 @@ func (m *MockHTTPTransport) GetRequests() []*http.Request {
 func (m *MockHTTPTransport) Reset() {
 	m.responses = make(map[string]*MockResponse)
 	m.requests = make([]*http.Request, 0)
+}
+
+// testTargets returns A and AAAA targets for IP addresses
+// Values that are not valid IP addresses are kept as A targets, so tests can check how providers handle them
+func testTargets(ips ...string) []Target {
+	targets := make([]Target, len(ips))
+	for i, ip := range ips {
+		recordType, err := recordTypeForIP(ip)
+		if err != nil {
+			recordType = recordTypeA
+		}
+		targets[i] = Target{Type: recordType, Value: ip}
+	}
+	return targets
 }

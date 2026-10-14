@@ -86,10 +86,15 @@ func (g *GoogleCloudDNSProvider) Name() string {
 	return g.name
 }
 
+// Capabilities returns what the provider can publish
+func (g *GoogleCloudDNSProvider) Capabilities() Capabilities {
+	return googleCloudDNSCapabilities
+}
+
 // UpdateRecords updates DNS A and AAAA records for the given domain with the provided IPs
 // All changes are sent in a single change, which Cloud DNS applies atomically
 func (g *GoogleCloudDNSProvider) UpdateRecords(ctx context.Context, domain string, ttl int, targets []Target) (result UpdateResult, err error) {
-	ips, err := ipsFromTargets(g.name, targets)
+	ips, err := plainIPsFromTargets(g.name, targets)
 	if err != nil {
 		return UpdateResult{}, err
 	}
@@ -298,4 +303,9 @@ func (g *GoogleCloudDNSProvider) performRequest(ctx context.Context, method stri
 	}
 
 	return nil
+}
+
+// googleCloudDNSCapabilities declares that the provider only publishes A and AAAA records that are not proxied
+var googleCloudDNSCapabilities = Capabilities{
+	Type: "googleCloudDns",
 }

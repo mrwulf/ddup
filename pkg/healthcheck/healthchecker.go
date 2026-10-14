@@ -13,6 +13,7 @@ import (
 	"github.com/italypaleale/ddup/pkg/config"
 	"github.com/italypaleale/ddup/pkg/dns"
 	"github.com/italypaleale/ddup/pkg/healthcheck/checker"
+	"github.com/italypaleale/ddup/pkg/iplookup"
 	"github.com/italypaleale/ddup/pkg/leader"
 	appmetrics "github.com/italypaleale/ddup/pkg/metrics"
 	"github.com/italypaleale/ddup/pkg/notify"
@@ -44,6 +45,11 @@ var ErrNotRunning = errors.New("health checker is not running")
 
 // NewHealthChecker creates a new HealthChecker instance
 func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.AppMetrics) (*HealthChecker, error) {
+	return newHealthChecker(dnsProviders, metrics)
+}
+
+// newHealthChecker is NewHealthChecker with options for the IP lookups, so tests can trust their own services
+func newHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.AppMetrics, lookupOpts ...iplookup.Option) (*HealthChecker, error) {
 	cfg := config.Get()
 
 	dcs := make(map[string]*domainChecker, len(cfg.Domains))
@@ -52,7 +58,7 @@ func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.
 		if !ok || provider == nil {
 			return nil, fmt.Errorf("domain '%s' references DNS provider '%s' that is not configured", d.RecordName, d.Provider)
 		}
-		lookupers, err := buildLookupers(cfg, d)
+		lookupers, err := buildLookupers(cfg, d, lookupOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("domain '%s': %w", d.RecordName, err)
 		}

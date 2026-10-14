@@ -1,0 +1,99 @@
+# The structure of a real deployment, with example names and addresses
+# Secrets are read from files with !file: the test replaces /etc/ddup/secrets with a folder that has fake values
+#
+# - ingress-lb: two VPS at priority 0 (round-robin), and a proxied Cloudflare Tunnel CNAME as the fallback at priority 1
+# - fast-lb: the same endpoints, with the tunnel preferred at priority 0 and the VPS as the fallback at priority 1
+# - dynamic DNS in another zone (another Cloudflare provider), that follows the public IPv4 address of the network
+# - two replicas that elect a leader, notifications to ntfy at an in-cluster address and by email through a relay without TLS
+interval: 30s
+
+leaderElection:
+  enabled: true
+
+domains:
+  - recordName: "ingress-lb.example.com"
+    provider: cloudflare
+    ttl: 60
+    healthChecks: &healthChecks
+      timeout: "5s"
+      attempts: 3
+      recoverAfter: 3
+      method: "HEAD"
+      expectStatus: "418"
+    endpoints:
+      - &vps-us
+        name: "vps-us"
+        url: "https://vps-us.example.com"
+        ip: "192.0.2.10"
+        priority: 0
+      - &vps-eu
+        name: "vps-eu"
+        url: "https://vps-eu.example.com"
+        ip: "192.0.2.11"
+        priority: 0
+      - &tunnel
+        name: "tunnel"
+        url: "https://external.example.com"
+        cname: "0a1b2c3d.cfargotunnel.com"
+        providerOptions:
+          cloudflare:
+            proxied: true
+        priority: 1
+
+  - recordName: "fast-lb.example.com"
+    provider: cloudflare
+    ttl: 60
+    healthChecks: *healthChecks
+    endpoints:
+      - <<: *tunnel
+        priority: 0
+      - <<: *vps-us
+        priority: 1
+      - <<: *vps-eu
+        priority: 1
+
+  # No url: not health-checked, healthy while the lookup works
+  - recordName: !file /etc/ddup/secrets/DDNS_RECORD_NAME
+    provider: cloudflare-ddns
+    ttl: 1
+    healthChecks:
+      timeout: "5s"
+      attempts: 3
+    endpoints:
+      - name: "home"
+        ipLookupFamily: 4
+        ipLookupURLs:
+          - url: "https://ipv4.lookup-a.example.com"
+          - url: "https://lookup-b.example.com"
+
+providers:
+  cloudflare:
+    cloudflare:
+      apiToken: !file /etc/ddup/secrets/CLOUDFLARE_API_TOKEN
+      zoneId: !file /etc/ddup/secrets/CLOUDFLARE_ZONE_ID
+  cloudflare-ddns:
+    cloudflare:
+      apiToken: !file /etc/ddup/secrets/DDNS_CLOUDFLARE_API_TOKEN
+      zoneId: !file /etc/ddup/secrets/DDNS_CLOUDFLARE_ZONE_ID
+
+notifications:
+  ntfy:
+    - name: "ntfy"
+      url: "http://ntfy.system.svc.cluster.local:80/ddup"
+      token: !file /etc/ddup/secrets/NTFY_TOKEN
+      allowPrivateDestinations: true
+      events: ["dns_updated", "dns_update_failed", "all_unhealthy"]
+      timeout: "10s"
+      maxAttempts: 5
+      retryInterval: "2s"
+  email:
+    - name: "email"
+      connectionString: !file /etc/ddup/secrets/EMAIL_CONNECTION_STRING
+      to:
+        - !file /etc/ddup/secrets/EMAIL_TO
+      events: ["dns_updated", "dns_update_failed", "all_unhealthy"]
+
+server:
+  enabled: true
+  bind: "0.0.0.0"
+  port: 7401

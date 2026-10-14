@@ -154,6 +154,9 @@ notifications:
       # One email is sent to each recipient
       to: ["postmaster@example.com"]
       events: ["dns_update_failed", "all_unhealthy"]
+  # Fork extension: add the status emoji, the priority tiers and the error of each unhealthy endpoint to every message (default: true)
+  # Set it to false for the shorter messages
+  detail: true
 
 # Run more than one replica (Kubernetes only)
 # All replicas check health, but only the leader updates DNS and sends notifications

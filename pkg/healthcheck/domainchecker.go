@@ -8,6 +8,7 @@ import (
 
 	"github.com/italypaleale/ddup/pkg/dns"
 	"github.com/italypaleale/ddup/pkg/healthcheck/checker"
+	"github.com/italypaleale/ddup/pkg/notify"
 )
 
 type domainChecker struct {
@@ -45,6 +46,10 @@ type domainChecker struct {
 
 	// Error of the latest failed DNS update, and the dns_update_failed notification was sent
 	notifiedError string
+
+	// Fork extension: details of the endpoints after the latest check, added to the notifications, see notifydetail.go
+	// Only used by the health check loop
+	notifyDetail notify.Detail
 
 	// When each endpoint last changed state and last failed, by IP; in memory only
 	times map[string]*endpointTimes

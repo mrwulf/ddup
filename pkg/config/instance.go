@@ -42,6 +42,9 @@ func GetDefaultConfig() *Config {
 			Bind:    "127.0.0.1",
 			Port:    7401,
 		},
+		Notifications: ConfigNotifications{
+			Detail: true,
+		},
 		Dev: defaultDevConfig,
 	}
 }

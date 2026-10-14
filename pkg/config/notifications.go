@@ -45,6 +45,11 @@ type ConfigNotifications struct {
 
 	// Notifications sent by email
 	Email []ConfigNotificationEmail `yaml:"email"`
+
+	// Fork extension: adds the status emoji, the priority tiers and the error of each unhealthy endpoint to every message
+	// See FORK.md
+	// +default true
+	Detail bool `yaml:"detail"`
 }
 
 // ConfigNotificationDelivery are the delivery settings shared by the notifications sent with HTTP requests

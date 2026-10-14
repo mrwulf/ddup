@@ -10,8 +10,10 @@ You can use ddup to configure [round-robin DNS](https://en.wikipedia.org/wiki/Ro
 
 ddup is **not** a DNS server, instead it works with "dynamic" DNS servers. Currently, it supports these DNS providers:
 
+- AWS Route53
 - Azure DNS
 - Cloudflare DNS
+- Google Cloud DNS
 - OVH
 
 <picture>
@@ -28,7 +30,7 @@ All the data in these images is sample data.
 
 <img src="screenshots/auto-refresh-menu.webp" alt="The auto-refresh menu" width="60%">
 
-This fork adds failover priorities, CNAME and proxied targets, dynamic DNS, webhooks and more: see [FORK.md](FORK.md) for each of them, and for the phone layout.
+This fork adds CNAME and proxied targets, dynamic DNS, templated webhooks, leader election and more: see [FORK.md](FORK.md) for each of them and for how they relate to upstream, and [UPSTREAM.md](UPSTREAM.md) for what has been submitted.
 
 ## Installation
 
@@ -48,6 +50,8 @@ docker run \
 ```
 
 > ddup follows semver for versioning. The command above uses the latest version in the 0.x branch. We do not publish a container image tagged "latest".
+
+This fork's images are `ghcr.io/mrwulf/ddup`, tagged with the fork's releases (for example `0.6.0-fork.22`); see [UPSTREAM.md](UPSTREAM.md).
 
 ### Using Docker Compose
 
@@ -188,9 +192,55 @@ Webhook templates can use secrets too: set them in the webhook's `vars` (each on
 - `providers`: Map of providers.
   - Key: provider name (e.g. `my-provider-1`)
   - Value: an object containing a provider configuration, which is one (and only one) of:
+    - [`awsRoute53`](#aws-route53-provider-settings)
     - [`azure`](#azure-provider-settings)
     - [`cloudflare`](#cloudflare-provider-settings)
+    - [`googleCloudDns`](#google-cloud-dns-provider-settings)
     - [`ovh`](#ovh-provider-settings)
+
+#### AWS Route53 Provider Settings
+
+Required settings:
+
+- `hostedZoneId`: ID of the hosted zone (e.g. `Z0123456789ABCDEFGHIJ`)
+
+Optional settings, to authenticate with an IAM user's access key:
+
+- `accessKeyId`: Access key ID
+- `secretAccessKey`: Secret access key
+
+If these are not set, ddup uses the [default AWS credential chain](https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html), which includes environmental variables such as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, shared config and credentials files (selected with `AWS_PROFILE`), IAM Roles for Service Accounts on EKS, ECS task roles, and EC2 instance profiles.
+
+The principal needs an IAM policy that allows listing and changing record sets in the hosted zone:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "route53:ListResourceRecordSets",
+        "route53:ChangeResourceRecordSets"
+      ],
+      "Resource": "arn:aws:route53:::hostedzone/<hosted-zone-id>"
+    }
+  ]
+}
+```
+
+To restrict the record names ddup can change, add a condition on the `route53:ChangeResourceRecordSetsNormalizedRecordNames` key.
+
+This provider only publishes plain `A` and `AAAA` records. Fork only: an endpoint with `cname` or `proxied` on a domain that uses it fails the update with an unsupported-target error.
+
+Example:
+
+```yaml
+providers:
+  example-provider-1:
+    awsRoute53:
+      hostedZoneId: "Z0123456789ABCDEFGHIJ"
+```
 
 #### Azure Provider Settings
 
@@ -273,6 +323,41 @@ providers:
       zoneId: "your-zone-id"
 ```
 
+#### Google Cloud DNS Provider Settings
+
+Required settings:
+
+- `projectId`: ID of the Google Cloud project containing the managed zone
+- `managedZone`: Name of the managed zone resource (e.g. `my-zone`), which is not the same as its DNS name
+
+Optional settings:
+
+- `credentialsFile`: Path to a service account key file (JSON)
+
+If `credentialsFile` is not set, ddup uses [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials), which include the `GOOGLE_APPLICATION_CREDENTIALS` environment variable, the attached service account when running on Google Cloud (including GKE Workload Identity), Workload Identity Federation, and credentials from `gcloud auth application-default login` (in development).
+
+The principal needs the **DNS Administrator** role (`roles/dns.admin`), which can be granted on the managed zone alone. If using a custom role instead, it needs these permissions:
+
+```text
+dns.changes.create
+dns.resourceRecordSets.list
+dns.resourceRecordSets.create
+dns.resourceRecordSets.update
+dns.resourceRecordSets.delete
+```
+
+This provider only publishes plain `A` and `AAAA` records. Fork only: an endpoint with `cname` or `proxied` on a domain that uses it fails the update with an unsupported-target error.
+
+Example:
+
+```yaml
+providers:
+  example-provider-1:
+    googleCloudDns:
+      projectId: "my-project"
+      managedZone: "my-zone"
+```
+
 #### OVH Provider Settings
 
 Required settings:
@@ -333,6 +418,19 @@ The commented-out Cloudflare example in `config.sample.yaml` sends mail through 
 
 If the API answers 403 with code 10102, the token lacks the permission. Code 10105 means the account isn't entitled to Email Sending, and 10203 means sending is disabled for the zone or account.
 
+### Leader election
+
+Fork only. To run more than one replica on Kubernetes, enable `leaderElection`: all replicas check health, but only the leader updates DNS and sends webhooks.
+
+- `leaderElection.enabled`: Enable leader election (default: false). When false, the instance always acts
+- `leaderElection.type`: Only `kubernetes` (a `Lease`) is supported
+- `leaderElection.name`: Name of the Lease (default: `ddup`)
+- `leaderElection.namespace`: Namespace of the Lease (default: the namespace the pod runs in)
+- `leaderElection.identity`: Unique ID of the replica (default: `$POD_IP`, then `$POD_NAME`, then the hostname). Request forwarding needs it to be the pod's IP address: set `POD_IP` from the downward API (`status.podIP`)
+- `leaderElection.leaseDuration` (default 15s), `renewDeadline` (default 10s) and `retryPeriod` (default 2s): the Lease timings; `leaseDuration` bounds the failover time
+
+The pod's service account needs `get`, `create` and `update` on the Lease. Standby replicas forward API requests to the leader, so every dashboard shows the leader's view; if the leader is unknown or can't be reached, the standby answers itself.
+
 ### Server Settings
 
 - `enabled`: Enable the server (disabled by default)
@@ -343,6 +441,7 @@ The server has no authentication, so keep it on a trusted network. It exposes:
 
 - `GET /api/status` and `GET /api/status/{recordname}`: current status of the domains
 - `POST /api/check`: runs health checks for all domains right away (the dashboard's "Check now" button), and returns the updated status. The request must include the header `X-Requested-By: ddup-dashboard`, which keeps other websites from triggering it through a visitor's browser. If a check finished less than 5 seconds ago, no new one is run. A forced check counts towards `attempts` and `recoverAfter` like a scheduled one, and the next scheduled check is then a full `interval` later
+- `GET /api/info`: version of the build (fork only)
 - `GET /healthz`: returns 204 when the server is up
 
 ### Logging Settings

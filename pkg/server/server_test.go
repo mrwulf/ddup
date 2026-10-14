@@ -101,7 +101,7 @@ func TestStaticCacheControl(t *testing.T) {
 		"favicon.svg":      {Data: []byte("<svg/>")},
 		"assets/app-1a.js": {Data: []byte("console.log(1)")},
 	}
-	srv := NewCachingFileServer(http.FS(fsys), 86400)
+	srv := NewCachingFileServer(http.FS(fsys), 31536000)
 
 	get := func(path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()

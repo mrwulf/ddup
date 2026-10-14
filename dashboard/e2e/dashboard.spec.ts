@@ -83,6 +83,42 @@ const recoveredDomains: DomainsResponse = {
     },
 }
 
+// Domains for the endpoint history, with an endpoint in each situation
+const historyDomains: DomainsResponse = {
+    'history.example': {
+        lastUpdated: '2026-10-13T09:30:00Z',
+        provider: 'cloudflare',
+        endpoints: [
+            // Recovered: it failed before, and the last failure is kept
+            { healthy: true, ip: '192.0.2.10', since: '2026-10-09T08:15:00Z', lastFailure: '2026-10-09T08:10:00Z' },
+            // Failing
+            {
+                healthy: false,
+                ip: '192.0.2.11',
+                failureCount: 3,
+                since: '2026-10-13T09:00:00Z',
+                lastFailure: '2026-10-13T09:29:00Z',
+            },
+            // Healthy since the first check after ddup started
+            { healthy: true, ip: '192.0.2.12', since: '2026-10-13T07:45:00Z', sinceStart: true },
+            // From a server that does not report the times
+            { healthy: true, ip: '192.0.2.13' },
+        ],
+    },
+    'other.example': {
+        lastUpdated: '2026-10-13T09:31:00Z',
+        provider: 'ovh',
+        endpoints: [{ healthy: true, ip: '198.51.100.7', since: '2026-10-12T22:00:00Z' }],
+    },
+}
+
+// Returns a response with only some of the domains
+const pickDomains = (from: DomainsResponse, ...names: string[]): DomainsResponse =>
+    Object.fromEntries(names.map((name) => [name, from[name]]))
+
+// The status shown by the icon in the browser tab and in the header
+type OverallStatus = 'healthy' | 'warning' | 'unhealthy' | 'unknown'
+
 // Mocks the /api/status endpoint
 // Change body to change the next responses
 const mockStatus = async (page: Page, body: DomainsResponse) => {
@@ -102,13 +138,6 @@ const deferred = () => {
     })
     return { promise, release }
 }
-
-const buildInfo = { version: '1.2.3', buildId: '1.2.3', commit: '0123456789abcdef', buildDate: '2026-01-01T00:00:00Z' }
-
-// The footer loads the version of the build once, and is left out if that fails
-test.beforeEach(async ({ page }) => {
-    await page.route('**/api/info', (route) => route.fulfill({ json: buildInfo }))
-})
 
 const cardTitles = (page: Page) => page.locator('[data-slot="card-title"]')
 
@@ -132,6 +161,28 @@ const expectSummary = async (page: Page, healthy: number, warning: number, unhea
     await expect(summaryCount(page, 'Healthy domains')).toHaveText(String(healthy))
     await expect(summaryCount(page, 'Domains with some unhealthy endpoints')).toHaveText(String(warning))
     await expect(summaryCount(page, 'Unhealthy domains')).toHaveText(String(unhealthy))
+}
+
+const historyButton = (page: Page, domain: string) => page.getByRole('button', { name: `History of ${domain}` })
+
+const historyDialog = (page: Page, domain: string) =>
+    page.getByRole('dialog', { name: `Endpoint history of ${domain}` })
+
+const tabIcon = (page: Page) => page.locator('head link[rel~="icon"]')
+
+const expectStatusIcon = async (page: Page, status: OverallStatus) => {
+    await expect(page.getByRole('img', { name: `Overall status: ${status}`, exact: true })).toBeVisible()
+
+    // The static icon from index.html is replaced, so the browser can't keep using it
+    // The new one is the pre-rendered PNG of the status, bundled as a separate file instead of a data URL
+    await expect(tabIcon(page)).toHaveCount(1)
+    await expect(tabIcon(page)).toHaveAttribute('type', 'image/png')
+    await expect(tabIcon(page)).toHaveAttribute('href', new RegExp(`^/assets/${status}-[\\w-]+\\.png$`))
+
+    const href = await tabIcon(page).evaluate((link: HTMLLinkElement) => link.href)
+    const response = await page.request.get(href)
+    expect(response.ok()).toBe(true)
+    expect(response.headers()['content-type']).toBe('image/png')
 }
 
 test.describe('domain list', () => {
@@ -216,6 +267,129 @@ test.describe('domain list', () => {
         await expect(cardTitles(page)).toHaveCount(0)
         await expect(page.getByText('No domains or endpoints found matching "nomatch"')).toBeVisible()
         await expectSummary(page, 0, 0, 0)
+    })
+})
+
+const tieredDomains: DomainsResponse = {
+    'tiered.example': {
+        lastUpdated,
+        provider: 'cloudflare',
+        endpoints: [
+            { name: 'tunnel', healthy: true, ip: 'tunnel.example.com', type: 'CNAME', proxied: true, priority: 1 },
+            { name: 'us', healthy: true, ip: '192.0.2.10', type: 'A', priority: 0, active: true },
+            { name: 'eu', healthy: false, ip: '2001:db8::10', type: 'AAAA', priority: 0, failureCount: 4 },
+        ],
+    },
+}
+
+test.describe('endpoints', () => {
+    test.beforeEach(async ({ page }) => {
+        await mockStatus(page, tieredDomains)
+        await page.goto('/')
+        await expect(cardTitles(page)).toHaveText(['tiered.example'])
+    })
+
+    test('lists the endpoints by priority, with their name and address', async ({ page }) => {
+        const card = domainCard(page, 'tiered.example')
+        await expect(card).toContainText('Endpoints (3)')
+        await expect(card).toContainText('2/3 endpoints healthy')
+
+        // The published endpoint comes first within its priority, and the name is the main label
+        const names = card.locator('div.truncate.text-sm')
+        await expect(names).toHaveText(['us', 'eu', 'tunnel'])
+        await expect(endpointRow(card, '192.0.2.10')).toContainText('us')
+        await expect(endpointRow(card, '2001:db8::10')).toContainText('eu')
+        await expect(endpointRow(card, 'tunnel.example.com')).toContainText('tunnel')
+    })
+
+    test('shows the type, the priority and whether the endpoint is published', async ({ page }) => {
+        const card = domainCard(page, 'tiered.example')
+
+        const published = endpointRow(card, '192.0.2.10')
+        await expect(published.getByTitle('Priority 0')).toBeVisible()
+        await expect(published.getByTitle('Published in DNS')).toBeVisible()
+        await expect(published.getByTitle('CNAME record')).toHaveCount(0)
+
+        const failing = endpointRow(card, '2001:db8::10')
+        await expect(failing.getByTitle('Priority 0')).toBeVisible()
+        await expect(failing.getByTitle('4 consecutive failed checks')).toBeVisible()
+        // Only healthy endpoints can be published or on standby
+        await expect(failing.getByTitle('Published in DNS')).toHaveCount(0)
+        await expect(failing.getByTitle('Healthy, on standby')).toHaveCount(0)
+
+        const standby = endpointRow(card, 'tunnel.example.com')
+        await expect(standby.getByTitle('Priority 1')).toBeVisible()
+        await expect(standby.getByTitle('Healthy, on standby')).toBeVisible()
+        await expect(standby.getByTitle('CNAME record')).toBeVisible()
+        await expect(standby.getByTitle('Proxied by Cloudflare')).toBeVisible()
+    })
+
+    test('every state has an icon and a text, so none relies on color alone', async ({ page }) => {
+        const card = domainCard(page, 'tiered.example')
+        const rows = [
+            { address: '192.0.2.10', texts: ['Healthy', 'Priority 0', 'Published in DNS'] },
+            { address: '2001:db8::10', texts: ['Unhealthy', 'Priority 0', '4 consecutive failed checks'] },
+            {
+                address: 'tunnel.example.com',
+                texts: ['Healthy', 'Priority 1', 'Healthy, on standby', 'CNAME record', 'Proxied by Cloudflare'],
+            },
+        ]
+        for (const { address, texts } of rows) {
+            const row = endpointRow(card, address)
+            // Every svg is decoration: the same information is in text, visible or for screen readers
+            const icons = row.locator('svg')
+            expect(await icons.count()).toBeGreaterThan(0)
+            for (const hidden of await icons.evaluateAll((els) => els.map((el) => el.getAttribute('aria-hidden')))) {
+                expect(hidden).toBe('true')
+            }
+            for (const text of texts) {
+                await expect(row.getByText(text, { exact: true })).toHaveCount(1)
+            }
+        }
+    })
+
+    test('the failed checks are a warning triangle with the count', async ({ page }) => {
+        const chip = endpointRow(domainCard(page, 'tiered.example'), '2001:db8::10').getByTitle(
+            '4 consecutive failed checks'
+        )
+        await expect(chip).toHaveText(/^4/)
+        await expect(chip.locator('svg.lucide-triangle-alert, svg.lucide-alert-triangle')).toHaveCount(1)
+    })
+
+    test('the legend explains every icon', async ({ page }) => {
+        for (const text of [
+            'CNAME record',
+            'Proxied by Cloudflare',
+            'Priority n (lower is preferred)',
+            'Published in DNS',
+            'Healthy, on standby',
+            'Consecutive failed checks',
+        ]) {
+            await expect(page.getByText(text).last()).toBeVisible()
+        }
+    })
+
+    test('the legend is not shown when there is nothing to explain', async ({ page }) => {
+        await mockStatus(page, {})
+        await page.goto('/')
+        await expect(page.getByText('No domains configured or available')).toBeVisible()
+        await expect(page.getByText('Consecutive failed checks')).toHaveCount(0)
+    })
+
+    test('the History button stays on the line that counts the healthy endpoints', async ({ page }) => {
+        const card = domainCard(page, 'tiered.example')
+        const line = card.getByText('2/3 endpoints healthy').locator('xpath=..')
+        await expect(line.getByRole('button', { name: 'History of tiered.example' })).toBeVisible()
+    })
+
+    test('search matches the name of an endpoint', async ({ page }) => {
+        const search = page.getByPlaceholder(searchPlaceholder)
+
+        await search.fill('TUNNEL')
+        await expect(cardTitles(page)).toHaveText(['tiered.example'])
+
+        await search.fill('nomatch')
+        await expect(cardTitles(page)).toHaveCount(0)
     })
 })
 
@@ -345,162 +519,434 @@ test.describe('Check now', () => {
     })
 })
 
-// Endpoints of a domain with a failover: priorities, a CNAME target behind Cloudflare's proxy and a name for each
-const tieredDomains: DomainsResponse = {
-    'tiered.example': {
-        lastUpdated,
-        provider: 'cloudflare',
-        endpoints: [
-            { name: 'tunnel', healthy: true, ip: 'tunnel.example.com', type: 'CNAME', proxied: true, priority: 1 },
-            { name: 'us', healthy: true, ip: '192.0.2.10', type: 'A', priority: 0, active: true },
-            { name: 'eu', healthy: false, ip: '2001:db8::10', type: 'AAAA', priority: 0, failureCount: 4 },
-        ],
-    },
-}
+test.describe('status icon', () => {
+    // The icon shows the worst status of all the domains
+    const cases: { when: string; body: DomainsResponse; status: OverallStatus }[] = [
+        {
+            when: 'all the domains are healthy',
+            body: pickDomains(domains, 'healthy.example', 'ipv6.example'),
+            status: 'healthy',
+        },
+        {
+            when: 'a domain has some unhealthy endpoints',
+            body: pickDomains(domains, 'healthy.example', 'partial.example'),
+            status: 'warning',
+        },
+        // This includes a domain with a warning too
+        { when: 'a domain is unhealthy', body: domains, status: 'unhealthy' },
+        { when: 'no domains are configured', body: {}, status: 'unknown' },
+    ]
+    for (const { when, body, status } of cases) {
+        test(`is ${status} when ${when}`, async ({ page }) => {
+            await mockStatus(page, body)
+            await page.goto('/')
+            await expect(page.getByText('Last updated:')).toBeVisible()
 
-test.describe('endpoints', () => {
-    test.beforeEach(async ({ page }) => {
-        await mockStatus(page, tieredDomains)
-        await page.goto('/')
-        await expect(cardTitles(page)).toHaveText(['tiered.example'])
-    })
+            await expectStatusIcon(page, status)
+        })
+    }
 
-    test('lists the endpoints by priority, with their name and address', async ({ page }) => {
-        const card = domainCard(page, 'tiered.example')
-        await expect(card).toContainText('Endpoints (3)')
-        await expect(card).toContainText('2/3 endpoints healthy')
-
-        // The published endpoint comes first within its priority, and the name is the main label
-        const names = card.locator('div.truncate.text-sm')
-        await expect(names).toHaveText(['us', 'eu', 'tunnel'])
-        await expect(endpointRow(card, '192.0.2.10')).toContainText('us')
-        await expect(endpointRow(card, '2001:db8::10')).toContainText('eu')
-        await expect(endpointRow(card, 'tunnel.example.com')).toContainText('tunnel')
-    })
-
-    test('shows the type, the priority and whether the endpoint is published', async ({ page }) => {
-        const card = domainCard(page, 'tiered.example')
-
-        const published = endpointRow(card, '192.0.2.10')
-        await expect(published.getByTitle('Priority 0')).toBeVisible()
-        await expect(published.getByTitle('Published in DNS')).toBeVisible()
-        await expect(published.getByTitle('CNAME record')).toHaveCount(0)
-
-        const failing = endpointRow(card, '2001:db8::10')
-        await expect(failing.getByTitle('Priority 0')).toBeVisible()
-        await expect(failing.getByTitle('4 consecutive failed checks')).toBeVisible()
-        // Only healthy endpoints can be published or on standby
-        await expect(failing.getByTitle('Published in DNS')).toHaveCount(0)
-        await expect(failing.getByTitle('Healthy, on standby')).toHaveCount(0)
-
-        const standby = endpointRow(card, 'tunnel.example.com')
-        await expect(standby.getByTitle('Priority 1')).toBeVisible()
-        await expect(standby.getByTitle('Healthy, on standby')).toBeVisible()
-        await expect(standby.getByTitle('CNAME record')).toBeVisible()
-        await expect(standby.getByTitle('Proxied by Cloudflare')).toBeVisible()
-    })
-
-    test('search matches the name of an endpoint', async ({ page }) => {
-        const search = page.getByPlaceholder(searchPlaceholder)
-
-        await search.fill('TUNNEL')
-        await expect(cardTitles(page)).toHaveText(['tiered.example'])
-
-        await search.fill('nomatch')
-        await expect(cardTitles(page)).toHaveCount(0)
-    })
-})
-
-test.describe('endpoint state', () => {
-    test('says since when an endpoint is healthy or failing', async ({ page }) => {
-        await mockStatus(page, {
-            'since.example': {
-                lastUpdated,
-                provider: 'cloudflare',
-                endpoints: [
-                    {
-                        healthy: true,
-                        ip: '192.0.2.1',
-                        since: '2026-01-02T03:00:00Z',
-                        lastFailure: '2026-01-02T02:00:00Z',
-                    },
-                    { healthy: true, ip: '192.0.2.2', since: '2026-01-02T03:00:00Z', sinceStart: true },
-                    { healthy: false, ip: '192.0.2.3', since: '2026-01-02T03:00:00Z', failureCount: 2 },
-                ],
-            },
+    test('is unknown until the status arrives', async ({ page }) => {
+        const response = deferred()
+        await page.route('**/api/status', async (route) => {
+            await response.promise
+            await route.fulfill({ json: domains })
         })
         await page.goto('/')
-        const card = domainCard(page, 'since.example')
-        await expect(card).toContainText('Endpoints (3)')
+        await expect(page.getByText('Loading domain data...')).toBeVisible()
 
-        await expect(endpointRow(card, '192.0.2.1')).toContainText(/Healthy since .+ \(last failure .+\)/)
-        await expect(endpointRow(card, '192.0.2.2')).toContainText(/Healthy since ddup started \(.+\)/)
-        const failing = endpointRow(card, '192.0.2.3')
-        await expect(failing).toContainText(/Failing since .+/)
-        await expect(failing).not.toContainText('last failure')
-    })
-})
+        await expectStatusIcon(page, 'unknown')
 
-test.describe('tab icon', () => {
-    const iconHref = (page: Page) => page.locator('link[rel~="icon"]').first().getAttribute('href')
-
-    const healthyOnly: DomainsResponse = { 'healthy.example': domains['healthy.example'] }
-    const warningOnly: DomainsResponse = { ...healthyOnly, 'partial.example': domains['partial.example'] }
-
-    test('shows the worst status of all the domains', async ({ page }) => {
-        const status = await mockStatus(page, healthyOnly)
-        await page.goto('/')
-        await expect(cardTitles(page)).toHaveCount(1)
-        await expect.poll(() => iconHref(page)).toMatch(/\/healthy-[\w-]+\.png$/)
-
-        status.body = warningOnly
-        await page.getByRole('button', { name: 'More refresh options' }).click()
-        await page.getByRole('menuitem', { name: 'Refresh now' }).click()
-        await expect.poll(() => iconHref(page)).toMatch(/\/warning-[\w-]+\.png$/)
-
-        status.body = domains
-        await page.getByRole('button', { name: 'More refresh options' }).click()
-        await page.getByRole('menuitem', { name: 'Refresh now' }).click()
-        await expect.poll(() => iconHref(page)).toMatch(/\/unhealthy-[\w-]+\.png$/)
+        response.release()
+        await expect(cardTitles(page)).toHaveText(domainNames)
+        await expectStatusIcon(page, 'unhealthy')
     })
 
-    test('shows an unhealthy status when the status cannot be loaded', async ({ page }) => {
+    test('is unhealthy when the status cannot be loaded', async ({ page }) => {
         await page.route('**/api/status', (route) => route.fulfill({ status: 500, body: 'boom' }))
         await page.goto('/')
         await expect(page.getByText(/^Failed to fetch domain data/)).toBeVisible()
-        await expect.poll(() => iconHref(page)).toMatch(/\/unhealthy-[\w-]+\.png$/)
-    })
-})
 
-test.describe('footer', () => {
-    test('shows the version of the build', async ({ page }) => {
-        await mockStatus(page, domains)
+        await expectStatusIcon(page, 'unhealthy')
+    })
+
+    test('is unhealthy when Check now fails, until the status is loaded again', async ({ page }) => {
+        await mockStatus(page, pickDomains(domains, 'healthy.example', 'ipv6.example'))
+        await page.route('**/api/check', (route) =>
+            route.fulfill({
+                status: 504,
+                json: { code: 'api_check_timeout', message: 'The check did not complete in time' },
+            })
+        )
         await page.goto('/')
+        await expectStatusIcon(page, 'healthy')
 
-        const footer = page.getByTitle('Version of this build of ddup')
-        await expect(footer).toContainText('ddup 1.2.3')
-        await expect(footer).toContainText('0123456')
+        // The domains were healthy when they were last loaded, but the icon shows that something is wrong
+        await page.getByRole('button', { name: 'Check now' }).click()
+        await expect(page.getByText(/^Failed to run check/)).toBeVisible()
+        await expectStatusIcon(page, 'unhealthy')
+
+        await page.getByRole('button', { name: 'More refresh options' }).click()
+        await page.getByRole('menuitem', { name: 'Refresh now' }).click()
+        await expect(cardTitles(page)).toHaveText(['healthy.example', 'ipv6.example'])
+        await expectStatusIcon(page, 'healthy')
     })
 
-    test('is left out if the version cannot be loaded', async ({ page }) => {
-        await page.route('**/api/info', (route) => route.fulfill({ status: 500, body: 'boom' }))
+    test('changes when the status changes', async ({ page }) => {
+        const status = await mockStatus(page, pickDomains(domains, 'healthy.example', 'down.example'))
+        await page.goto('/')
+        await expect(domainBadge(page, 'down.example')).toHaveText('Unhealthy')
+        await expectStatusIcon(page, 'unhealthy')
+
+        status.body = pickDomains(recoveredDomains, 'healthy.example', 'down.example')
+        await page.getByRole('button', { name: 'More refresh options' }).click()
+        await page.getByRole('menuitem', { name: 'Refresh now' }).click()
+
+        await expect(domainBadge(page, 'down.example')).toHaveText('Healthy')
+        await expectStatusIcon(page, 'healthy')
+    })
+
+    test('ignores the search', async ({ page }) => {
         await mockStatus(page, domains)
         await page.goto('/')
         await expect(cardTitles(page)).toHaveText(domainNames)
 
-        await expect(page.getByTitle('Version of this build of ddup')).toHaveCount(0)
+        await page.getByPlaceholder(searchPlaceholder).fill('healthy.example')
+        await expect(cardTitles(page)).toHaveText(['healthy.example'])
+        await expectSummary(page, 1, 0, 0)
+
+        await expectStatusIcon(page, 'unhealthy')
+    })
+
+    test.describe('without JavaScript', () => {
+        test.use({ javaScriptEnabled: false })
+
+        test('index.html has a static icon', async ({ page }) => {
+            await page.goto('/')
+
+            await expect(tabIcon(page)).toHaveAttribute('href', '/favicon.svg')
+            const response = await page.request.get('/favicon.svg')
+            expect(response.ok()).toBe(true)
+            expect(response.headers()['content-type']).toBe('image/svg+xml')
+        })
     })
 })
 
-test('the theme button cycles through the themes', async ({ page }) => {
-    await mockStatus(page, domains)
-    await page.goto('/')
-    await expect(cardTitles(page)).toHaveText(domainNames)
+test.describe('endpoint history', () => {
+    // Fix the language, the time zone and the current date, so the times are formatted the same everywhere
+    test.use({ locale: 'en-US', timezoneId: 'UTC' })
 
-    await page.getByRole('button', { name: /^Theme: system/ }).click()
-    await page.getByRole('button', { name: /^Theme: light/ }).click()
-    await page.getByRole('button', { name: /^Theme: dark/ }).click()
-    await expect(page.getByRole('button', { name: /^Theme: system/ })).toBeVisible()
+    test.beforeEach(async ({ page }) => {
+        await page.clock.setFixedTime(new Date('2026-10-13T10:00:00Z'))
+        await mockStatus(page, historyDomains)
+        await page.goto('/')
+        await expect(cardTitles(page)).toHaveText(['history.example', 'other.example'])
+    })
+
+    test('opens with a click and closes with the same button', async ({ page }) => {
+        const button = historyButton(page, 'history.example')
+        await expect(button).toHaveAttribute('type', 'button')
+        await expect(button).toHaveAttribute('aria-haspopup', 'dialog')
+        await expect(button).toHaveAttribute('aria-expanded', 'false')
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+
+        await button.click()
+        const dialog = historyDialog(page, 'history.example')
+        await expect(dialog).toBeVisible()
+        await expect(button).toHaveAttribute('aria-expanded', 'true')
+        await expect(button).toHaveAttribute('aria-controls', (await dialog.getAttribute('id')) ?? '')
+        // Focus moves into the dialog
+        await expect(dialog).toBeFocused()
+
+        await button.click()
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+        await expect(button).toHaveAttribute('aria-expanded', 'false')
+        await expect(button).not.toHaveAttribute('aria-controls')
+        await expect(button).toBeFocused()
+    })
+
+    for (const key of ['Enter', 'Space']) {
+        test(`opens with the keyboard (${key})`, async ({ page }) => {
+            const button = historyButton(page, 'history.example')
+            await button.focus()
+            await page.keyboard.press(key)
+
+            const dialog = historyDialog(page, 'history.example')
+            await expect(dialog).toBeVisible()
+            await expect(dialog).toBeFocused()
+            await expect(button).toHaveAttribute('aria-expanded', 'true')
+        })
+    }
+
+    test('Escape closes it and focus returns to the button', async ({ page }) => {
+        const button = historyButton(page, 'history.example')
+        await button.click()
+        await expect(historyDialog(page, 'history.example')).toBeFocused()
+
+        await page.keyboard.press('Escape')
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+        await expect(button).toBeFocused()
+        await expect(button).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    test('the close button closes it and focus returns to the button', async ({ page }) => {
+        const button = historyButton(page, 'history.example')
+        await button.click()
+        await historyDialog(page, 'history.example').getByRole('button', { name: 'Close' }).click()
+
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+        await expect(button).toBeFocused()
+    })
+
+    test('a click outside closes it', async ({ page }) => {
+        const button = historyButton(page, 'history.example')
+        await button.click()
+        await expect(historyDialog(page, 'history.example')).toBeVisible()
+
+        // Clicking inside the dialog does not close it
+        await historyDialog(page, 'history.example').getByText('Last updated:').click()
+        await expect(historyDialog(page, 'history.example')).toBeVisible()
+
+        await page.getByRole('heading', { name: 'ddup' }).click()
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+        await expect(button).toHaveAttribute('aria-expanded', 'false')
+        // Focus doesn't stay on the body
+        await expect(button).toBeFocused()
+    })
+
+    test('a click on another control closes it and that control gets focus', async ({ page }) => {
+        await historyButton(page, 'history.example').click()
+        await expect(historyDialog(page, 'history.example')).toBeVisible()
+
+        const search = page.getByPlaceholder(searchPlaceholder)
+        await search.click()
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+        await expect(search).toBeFocused()
+    })
+
+    test('a tap outside closes it', async ({ browser }) => {
+        const context = await browser.newContext({
+            hasTouch: true,
+            isMobile: true,
+            locale: 'en-US',
+            timezoneId: 'UTC',
+            viewport: { width: 390, height: 844 },
+        })
+        const page = await context.newPage()
+        await mockStatus(page, historyDomains)
+        await page.goto('/')
+        await expect(cardTitles(page)).toHaveText(['history.example', 'other.example'])
+
+        await historyButton(page, 'history.example').tap()
+        await expect(historyDialog(page, 'history.example')).toBeVisible()
+
+        await page.getByRole('heading', { name: 'ddup' }).tap()
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+        await context.close()
+    })
+
+    test('moving focus out of it with Tab closes it, without a keyboard trap', async ({ page }) => {
+        await historyButton(page, 'history.example').click()
+        const dialog = historyDialog(page, 'history.example')
+        await expect(dialog).toBeFocused()
+
+        // The next stop is the close button, which is inside the dialog
+        await page.keyboard.press('Tab')
+        await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused()
+        await expect(dialog).toBeVisible()
+
+        // The next one is outside
+        await page.keyboard.press('Tab')
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+        await expect(historyButton(page, 'history.example')).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    test('moving focus out of it with Shift+Tab closes it', async ({ page }) => {
+        const button = historyButton(page, 'history.example')
+        await button.click()
+        await expect(historyDialog(page, 'history.example')).toBeFocused()
+
+        // The button is right before the dialog
+        await page.keyboard.press('Shift+Tab')
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+        await expect(button).toBeFocused()
+    })
+
+    test('only one is open at a time', async ({ page }) => {
+        await historyButton(page, 'history.example').click()
+        await expect(historyDialog(page, 'history.example')).toBeVisible()
+
+        await historyButton(page, 'other.example').click()
+        await expect(page.getByRole('dialog')).toHaveCount(1)
+        await expect(historyDialog(page, 'other.example')).toBeVisible()
+        await expect(historyButton(page, 'history.example')).toHaveAttribute('aria-expanded', 'false')
+        await expect(historyButton(page, 'other.example')).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    test('lists the endpoints with how long they have been healthy or failing', async ({ page }) => {
+        await historyButton(page, 'history.example').click()
+        const items = historyDialog(page, 'history.example').getByRole('listitem')
+        await expect(items).toHaveCount(4)
+
+        // Recovered, with the last failure
+        await expect(items.nth(0)).toContainText('192.0.2.10')
+        await expect(items.nth(0)).toContainText('Healthy since Oct 9, 8:15 AM')
+        await expect(items.nth(0)).toContainText('Last failure: Oct 9, 8:10 AM')
+
+        // Failing
+        await expect(items.nth(1)).toContainText('192.0.2.11')
+        await expect(items.nth(1)).toContainText('Unhealthy since Oct 13, 9:00 AM')
+
+        // The start is not known
+        await expect(items.nth(2)).toContainText('192.0.2.12')
+        await expect(items.nth(2)).toContainText('Healthy since ddup started (Oct 13, 7:45 AM)')
+        await expect(items.nth(2)).not.toContainText('Last failure')
+
+        // No times from the server: only the state
+        await expect(items.nth(3)).toContainText('192.0.2.13')
+        await expect(items.nth(3)).toContainText('Healthy')
+        await expect(items.nth(3)).not.toContainText('since')
+        await expect(items.nth(3)).not.toContainText('Last failure')
+
+        // The times are real time elements
+        const first = items.nth(0).locator('time')
+        await expect(first).toHaveCount(2)
+        await expect(first.nth(0)).toHaveAttribute('datetime', '2026-10-09T08:15:00Z')
+        await expect(first.nth(1)).toHaveAttribute('datetime', '2026-10-09T08:10:00Z')
+    })
+
+    test('includes the year for times before this year', async ({ page }) => {
+        await page.unroute('**/api/status')
+        await mockStatus(page, {
+            'old.example': {
+                lastUpdated: '2026-10-13T09:30:00Z',
+                provider: 'ovh',
+                endpoints: [{ healthy: true, ip: '198.51.100.8', since: '2025-12-31T23:30:00Z' }],
+            },
+        })
+        await page.getByRole('button', { name: 'More refresh options' }).click()
+        await page.getByRole('menuitem', { name: 'Refresh now' }).click()
+        await expect(cardTitles(page)).toHaveText(['old.example'])
+
+        await historyButton(page, 'old.example').click()
+        await expect(historyDialog(page, 'old.example')).toContainText('Healthy since Dec 31, 2025, 11:30 PM')
+    })
+
+    test('the button is on the line that counts the healthy endpoints', async ({ page }) => {
+        const card = domainCard(page, 'history.example')
+        const line = card.getByText('3/4 endpoints healthy').locator('xpath=..')
+        await expect(line.getByRole('button', { name: 'History of history.example' })).toBeVisible()
+
+        // The time of the last update stays in the second row of the card
+        await expect(card.getByText('Provider: cloudflare').locator('xpath=..')).toContainText('2026')
+    })
+
+    test('repeats the time of the last update as the first line of the dialog', async ({ page }) => {
+        await historyButton(page, 'history.example').click()
+        const dialog = historyDialog(page, 'history.example')
+        await expect(dialog).toContainText('Last updated: Oct 13, 9:30 AM')
+        await expect(dialog.locator('time[datetime="2026-10-13T09:30:00Z"]')).toHaveCount(1)
+
+        // The heading comes first, then the time
+        const lines = await dialog.locator('h2, p').allInnerTexts()
+        expect(lines[0]).toBe('Endpoint history of history.example')
+        expect(lines[1]).toBe('Last updated: Oct 13, 9:30 AM')
+    })
+
+    test('the endpoint rows stay the same', async ({ page }) => {
+        const card = domainCard(page, 'history.example')
+        await expect(endpointRow(card, '192.0.2.11')).toContainText('3 consecutive failed checks')
+        await expect(endpointRow(card, '192.0.2.10')).not.toContainText('consecutive failed')
+        await expect(card).not.toContainText('since')
+    })
+
+    test('stays inside a narrow screen', async ({ page }) => {
+        await page.setViewportSize({ width: 320, height: 640 })
+        const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+        for (const domain of ['history.example', 'other.example']) {
+            await historyButton(page, domain).click()
+            const dialog = historyDialog(page, domain)
+            await expect(dialog).toBeVisible()
+
+            const box = await dialog.boundingBox()
+            expect(box).not.toBeNull()
+            expect(box!.x).toBeGreaterThanOrEqual(0)
+            expect(box!.y).toBeGreaterThanOrEqual(0)
+            expect(box!.x + box!.width).toBeLessThanOrEqual(320)
+            expect(box!.y + box!.height).toBeLessThanOrEqual(640)
+            // The dialog doesn't make the page wider
+            expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(pageWidth)
+
+            await page.keyboard.press('Escape')
+        }
+    })
+
+    test('stays next to its button when the page is scrolled or resized', async ({ page }) => {
+        await page.setViewportSize({ width: 800, height: 400 })
+        const button = historyButton(page, 'history.example')
+        await button.click()
+        const dialog = historyDialog(page, 'history.example')
+        await expect(dialog).toBeVisible()
+
+        // The dialog is right below the button, or right above it if there is more room there
+        const gap = async () => {
+            const b = (await button.boundingBox())!
+            const d = (await dialog.boundingBox())!
+            return Math.min(Math.abs(d.y - (b.y + b.height)), Math.abs(b.y - (d.y + d.height)))
+        }
+        await expect.poll(gap).toBeLessThan(10)
+
+        const scrollBefore = await page.evaluate(() => window.scrollY)
+        await page.evaluate(() => window.scrollBy(0, 60))
+        expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(scrollBefore)
+        await expect.poll(gap).toBeLessThan(10)
+
+        await page.setViewportSize({ width: 360, height: 400 })
+        await expect.poll(gap).toBeLessThan(10)
+        await expect
+            .poll(async () => {
+                const box = (await dialog.boundingBox())!
+                return box.x + box.width
+            })
+            .toBeLessThanOrEqual(360)
+    })
+
+    test('the button and the close button are at least 24 by 24 pixels', async ({ page }) => {
+        await historyButton(page, 'history.example').click()
+        for (const button of [
+            historyButton(page, 'history.example'),
+            historyDialog(page, 'history.example').getByRole('button', { name: 'Close' }),
+        ]) {
+            const box = await button.boundingBox()
+            expect(box!.width).toBeGreaterThanOrEqual(24)
+            expect(box!.height).toBeGreaterThanOrEqual(24)
+        }
+    })
+
+    test('the buttons show a pointer cursor', async ({ page }) => {
+        await historyButton(page, 'history.example').click()
+        for (const button of [
+            historyButton(page, 'history.example'),
+            historyDialog(page, 'history.example').getByRole('button', { name: 'Close' }),
+        ]) {
+            await expect(button).toHaveCSS('cursor', 'pointer')
+        }
+    })
+
+    test('shows the dialog in front of the next cards', async ({ page }) => {
+        await page.setViewportSize({ width: 1280, height: 800 })
+        await historyButton(page, 'history.example').click()
+        const dialog = historyDialog(page, 'history.example')
+        await expect(dialog).toBeVisible()
+
+        // The element at the center of the dialog is the dialog (or something in it), not a card behind it
+        const inFront = await dialog.evaluate((el) => {
+            const rect = el.getBoundingClientRect()
+            const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+            return top !== null && el.contains(top)
+        })
+        expect(inFront).toBe(true)
+    })
 })
 
 test('enabled buttons show a pointer cursor', async ({ page }) => {

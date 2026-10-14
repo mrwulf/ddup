@@ -97,11 +97,12 @@ func TestForceCheckEndpoint(t *testing.T) {
 
 func TestStaticCacheControl(t *testing.T) {
 	fsys := fstest.MapFS{
-		"index.html":       {Data: []byte("<html></html>")},
+		"index.html":       {Data: []byte("<html><head></head></html>")},
 		"favicon.svg":      {Data: []byte("<svg/>")},
 		"assets/app-1a.js": {Data: []byte("console.log(1)")},
 	}
-	srv := NewCachingFileServer(http.FS(fsys), 31536000)
+	srv, err := NewCachingFileServer(http.FS(fsys), 31536000, buildInfo{})
+	require.NoError(t, err)
 
 	get := func(path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -118,41 +119,6 @@ func TestStaticCacheControl(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Header().Get("Cache-Control"), "immutable")
 	assert.Contains(t, rec.Header().Get("Cache-Control"), "max-age=31536000")
-}
-
-func TestInfoEndpoint(t *testing.T) {
-	get := func(t *testing.T) buildInfoResponse {
-		t.Helper()
-		s, err := NewServer(NewServerOpts{HealthChecker: &fakeProvider{}})
-		require.NoError(t, err)
-		rec := httptest.NewRecorder()
-		s.handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/info", nil))
-		require.Equal(t, http.StatusOK, rec.Code)
-
-		var res buildInfoResponse
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res))
-		return res
-	}
-
-	t.Run("returns the build", func(t *testing.T) {
-		oldVersion, oldID, oldCommit, oldDate := buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate
-		t.Cleanup(func() {
-			buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate = oldVersion, oldID, oldCommit, oldDate
-		})
-		buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate = "0.6.0-fork.16", "0.6.0-fork.16", "3b95f32", "2026-10-05T19:00:00Z"
-
-		assert.Equal(t, buildInfoResponse{Version: "0.6.0-fork.16", BuildID: "0.6.0-fork.16", Commit: "3b95f32", BuildDate: "2026-10-05T19:00:00Z"}, get(t))
-	})
-
-	t.Run("a development build has only the default version", func(t *testing.T) {
-		oldVersion, oldID, oldCommit, oldDate := buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate
-		t.Cleanup(func() {
-			buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate = oldVersion, oldID, oldCommit, oldDate
-		})
-		buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate = "canary", "", "", ""
-
-		assert.Equal(t, buildInfoResponse{Version: "canary"}, get(t))
-	})
 }
 
 func TestStatusEndpoints(t *testing.T) {
@@ -246,9 +212,10 @@ func TestCORS(t *testing.T) {
 
 func TestStaticIfModifiedSince(t *testing.T) {
 	fsys := fstest.MapFS{
-		"index.html": {Data: []byte("<html></html>")},
+		"index.html": {Data: []byte("<html><head></head></html>")},
 	}
-	srv := NewCachingFileServer(http.FS(fsys), 60)
+	srv, err := NewCachingFileServer(http.FS(fsys), 60, buildInfo{})
+	require.NoError(t, err)
 
 	get := func(t *testing.T, ifModifiedSince string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -274,7 +241,7 @@ func TestStaticIfModifiedSince(t *testing.T) {
 	// A copy from before the server started is stale
 	rec = get(t, time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat))
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "<html></html>", rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "<html>")
 
 	// Invalid dates are ignored
 	rec = get(t, "not a date")
@@ -351,4 +318,65 @@ func TestServerRun(t *testing.T) {
 		_ = ln.Close()
 		require.ErrorContains(t, waitForRun(t, runErr), "app server failed")
 	})
+}
+
+// Sets the build info for the duration of the test
+func setBuildInfo(t *testing.T, version, id, commit, date string) {
+	t.Helper()
+	oldVersion, oldID, oldCommit, oldDate := buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate
+	t.Cleanup(func() {
+		buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate = oldVersion, oldID, oldCommit, oldDate
+	})
+	buildinfo.AppVersion, buildinfo.BuildId, buildinfo.CommitHash, buildinfo.BuildDate = version, id, commit, date
+}
+
+func TestBuildHeader(t *testing.T) {
+	setBuildInfo(t, "1.2.3", "build-42", "0123456789abcdef", "2026-01-02T03:04:05Z")
+
+	s, err := NewServer(NewServerOpts{HealthChecker: &fakeProvider{}})
+	require.NoError(t, err)
+
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		s.handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+		return rec
+	}
+
+	t.Run("API responses have the build", func(t *testing.T) {
+		rec := get("/api/status")
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "1.2.3|build-42|0123456789abcdef", rec.Header().Get(headerBuild))
+		// The response is the same as before
+		assert.JSONEq(t, `{"a.example.com":{"lastUpdated":"0001-01-01T00:00:00Z","provider":"p","endpoints":null}}`, rec.Body.String())
+	})
+
+	t.Run("matches the build in the page", func(t *testing.T) {
+		info := newBuildInfo()
+		page, err := info.insertIntoPage([]byte("<head></head>"))
+		require.NoError(t, err)
+
+		var got buildInfo
+		require.NoError(t, json.Unmarshal([]byte(extractBuildScript(t, string(page))), &got))
+		assert.Equal(t, get("/api/status").Header().Get(headerBuild), got.Build)
+	})
+
+	t.Run("errors from the API have it too", func(t *testing.T) {
+		rec := get("/api/status/unknown")
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+		assert.NotEmpty(t, rec.Header().Get(headerBuild))
+	})
+
+	t.Run("GET /api/info is gone", func(t *testing.T) {
+		assert.Equal(t, http.StatusNotFound, get("/api/info").Code)
+	})
+
+	t.Run("other paths don't have it", func(t *testing.T) {
+		assert.Empty(t, get("/healthz").Header().Get(headerBuild))
+	})
+}
+
+func TestBuildIdentifier(t *testing.T) {
+	assert.Equal(t, "1.2.3|build-42|abc", buildIdentifier("1.2.3", "build-42", "abc"))
+	assert.Equal(t, "canary||", buildIdentifier("canary", "", ""))
+	assert.Equal(t, "a_b_c|_|", buildIdentifier("a\nb\u00e9c", "\x7f", ""))
 }

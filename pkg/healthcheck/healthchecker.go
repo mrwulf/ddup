@@ -10,11 +10,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/italypaleale/go-kit/utils"
-
 	"github.com/italypaleale/ddup/pkg/config"
 	"github.com/italypaleale/ddup/pkg/dns"
 	"github.com/italypaleale/ddup/pkg/healthcheck/checker"
+	"github.com/italypaleale/ddup/pkg/iplookup"
 	"github.com/italypaleale/ddup/pkg/leader"
 	appmetrics "github.com/italypaleale/ddup/pkg/metrics"
 	"github.com/italypaleale/ddup/pkg/notify"
@@ -25,11 +24,10 @@ type HealthChecker struct {
 	// Key is domain name
 	domainCheckers map[string]*domainChecker
 	// Optional; may be nil
-	notifier *notify.Notifier
-	// Decides whether this instance may update DNS and send webhooks; checks always run
+	notifier Notifier
+	// Decides whether this instance may update DNS and send notifications; checks always run
+	// Optional; nil means this instance always acts
 	elector leader.Elector
-	// Set while we're a standby, so the cycle where we become leader re-asserts DNS
-	wasStandby bool
 	// Requests to run a check right away; handled by Run, so checks never overlap
 	forceCh chan forceRequest
 }
@@ -46,7 +44,12 @@ type forceRequest struct {
 var ErrNotRunning = errors.New("health checker is not running")
 
 // NewHealthChecker creates a new HealthChecker instance
-func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.AppMetrics, notifier *notify.Notifier, elector leader.Elector) (*HealthChecker, error) {
+func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.AppMetrics) (*HealthChecker, error) {
+	return newHealthChecker(dnsProviders, metrics)
+}
+
+// newHealthChecker is NewHealthChecker with options for the IP lookups, so tests can trust their own services
+func newHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.AppMetrics, lookupOpts ...iplookup.Option) (*HealthChecker, error) {
 	cfg := config.Get()
 
 	dcs := make(map[string]*domainChecker, len(cfg.Domains))
@@ -55,14 +58,15 @@ func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.
 		if !ok || provider == nil {
 			return nil, fmt.Errorf("domain '%s' references DNS provider '%s' that is not configured", d.RecordName, d.Provider)
 		}
-		endpoints := make(map[string]*config.ConfigEndpoint, len(d.Endpoints))
-		for _, ep := range d.Endpoints {
-			endpoints[ep.Target()] = ep
+		lookupers, err := buildLookupers(cfg, d, lookupOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("domain '%s': %w", d.RecordName, err)
 		}
 		dcs[d.RecordName] = &domainChecker{
-			endpoints:  endpoints,
-			checker:    checker.New(d.RecordName, d.Endpoints, d.HealthChecks, metrics),
+			checker:    checker.New(d.RecordName, d.Endpoints, d.HealthChecks, metrics, lookupers),
 			ttl:        d.TTL,
+			priorities: endpointPriorities(d.Endpoints),
+			names:      endpointNames(d.Endpoints),
 			failedIPs:  make(map[string]int, 0),
 			recovering: make(map[string]int, 0),
 			provider:   provider,
@@ -71,8 +75,6 @@ func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.
 
 	return &HealthChecker{
 		domainCheckers: dcs,
-		notifier:       notifier,
-		elector:        elector,
 		forceCh:        make(chan forceRequest, 1),
 	}, nil
 }
@@ -137,12 +139,11 @@ func (hc *HealthChecker) ForceCheck(ctx context.Context) error {
 func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 	var err error
 
-	// Only the leader acts; a standby still tracks state so it's ready to take over
+	// Only the leader acts; a standby still tracks state (health, times, whether the domain is down) so it's ready to take over
 	isLeader := hc.elector == nil || hc.elector.IsLeader()
-	// On takeover, assume nothing we "published" earlier counts: the old leader may have died mid-change
-	// UpdateRecords is idempotent and reports Changed=false when records are already right, so this costs one no-op call per domain and sends no duplicate webhooks
-	resync := isLeader && hc.wasStandby
-	hc.wasStandby = !isLeader
+	// On takeover, assume nothing "published" earlier counts: the old leader may have died mid-change
+	// UpdateRecords is idempotent and reports Changed=false when the records are already right, so this costs one no-op call per domain and sends no duplicate notification
+	// The domain stays marked until an update succeeds, because a standby has already recorded the healthy endpoints, and a failed update would otherwise never be retried
 
 	for domainName, dc := range hc.domainCheckers {
 		domainLog := slog.With("domain", domainName)
@@ -160,22 +161,10 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		recoverAfter := dc.checker.GetRecoverAfter()
 		recovering := dc.getRecovering()
 		newHealthyIPs := make([]string, 0, len(results))
-		endpointStates := make([]notify.EndpointState, 0, len(results))
+		targets := make(map[string]dns.Target, len(results))
 		for _, result := range results {
-			// Endpoints that look up their IP address report what they found; others have a fixed target
-			ip := result.Target
-			if ip == "" {
-				ip = result.Endpoint.Target()
-			}
-			state := notify.EndpointState{Name: result.Endpoint.Name, IP: ip, Priority: result.Endpoint.Priority, Healthy: result.Healthy}
-			if result.Error != nil {
-				state.Error = result.Error.Error()
-			}
-			endpointStates = append(endpointStates, state)
-
-			if ip != "" {
-				dc.recordCheck(ip, result.Healthy)
-			}
+			// The key of an endpoint is what it publishes: its IP address (the one it looked up, for a dynamic endpoint) or its CNAME hostname
+			ip := resultIP(result)
 
 			// An endpoint whose IP address has never been found has nothing we can publish or keep track of
 			if ip == "" {
@@ -183,16 +172,24 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 				continue
 			}
 
+			target, targetErr := resultTarget(result)
+			if targetErr != nil {
+				// The configuration has been validated, so this indicates a development-time error
+				domainLog.ErrorContext(ctx, "Invalid endpoint", "endpoint", result.Endpoint.Name, "error", targetErr)
+				continue
+			}
+			targets[ip] = target
+
 			// If the endpoint is healthy, save it in the healthy list and remove any record of recent failed attempts
 			if result.Healthy {
-				domainLog.DebugContext(ctx, "✓ Endpoint is healthy", "endpoint", result.Endpoint.Name, "ip", ip)
+				domainLog.DebugContext(ctx, "✓ Endpoint is healthy", "endpoint", result.Endpoint.Name, "target", ip)
 
 				// An endpoint that was removed from DNS must pass recoverAfter consecutive checks before it's added back
 				// Endpoints that were not removed (including all endpoints on the first run) are added right away
 				if failedIPs[ip] >= maxAttempts && recoverAfter > 1 {
 					recovering[ip]++
 					if recovering[ip] < recoverAfter {
-						domainLog.InfoContext(ctx, "Endpoint is recovering", "endpoint", result.Endpoint.Name, "ip", ip, "passed", recovering[ip], "required", recoverAfter)
+						domainLog.InfoContext(ctx, "Endpoint is recovering", "endpoint", result.Endpoint.Name, "target", ip, "passed", recovering[ip], "required", recoverAfter)
 						continue
 					}
 				}
@@ -204,7 +201,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 			}
 
 			// Endpoint is unhealthy
-			domainLog.WarnContext(ctx, "✗ Endpoint health check failed", "endpoint", result.Endpoint.Name, "ip", ip, "error", result.Error)
+			domainLog.WarnContext(ctx, "✗ Endpoint health check failed", "endpoint", result.Endpoint.Name, "target", ip, "error", result.Error)
 			failedIPs[ip]++
 			delete(recovering, ip)
 
@@ -219,85 +216,125 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 				newHealthyIPs = append(newHealthyIPs, ip)
 			}
 		}
-		dc.setRecovering(recovering)
 
-		dc.noteTargets(results, newHealthyIPs, currentHealthyIPs, slices.Collect(maps.Keys(failedIPs)))
-		dc.updateTimes(newHealthyIPs)
-		endpoints := dc.getEndpoints()
+		// Forget the state of addresses that endpoints no longer publish, because the address they look up changed
+		forgetOtherIPs(results, failedIPs, recovering)
+		dc.setRecovering(recovering)
+		dc.setTargets(targets)
+		dc.notePriorities(results, currentHealthyIPs, newHealthyIPs)
+		dc.noteNames(results, currentHealthyIPs, newHealthyIPs)
 
 		// Only the healthy endpoints with the lowest priority value are published
-		// The previous publication is derived from the previous healthy endpoints in the same way, so we only touch DNS when what's published changes
-		newPub := selectPublication(endpoints, newHealthyIPs)
-		prevPub := selectPublication(endpoints, currentHealthyIPs)
-		for i := range endpointStates {
-			endpointStates[i].Active = slices.Contains(newPub.values(), endpointStates[i].IP)
-		}
+		// The previous selection is derived from the previous healthy endpoints in the same way, so we only touch DNS when what's published changes
+		priorities := dc.getPriorities()
+		publishIPs := selectLowestPriority(priorities, newHealthyIPs)
+		previousPublishIPs := selectLowestPriority(priorities, currentHealthyIPs)
+		publishTargets := targetsFor(targets, publishIPs)
+		previousTargets := targetsFor(targets, previousPublishIPs)
 
-		event := notify.Event{
-			Domain:       domainName,
-			Status:       notify.StatusFor(endpointStates, ""),
-			Healthy:      newHealthyIPs,
-			Published:    newPub.values(),
-			Tier:         newPub.priority,
-			PreviousTier: prevPub.priority,
-			Previous:     currentHealthyIPs,
-			Endpoints:    endpointStates,
-		}
+		// Notify when the domain has no healthy endpoints
+		endpointStates := notifyEndpointStates(results, newHealthyIPs)
+		hc.notifyOutage(dc, domainName, endpointStates, previousPublishIPs, len(newHealthyIPs) == 0, isLeader)
 
-		// Notify when we transition to having no healthy endpoints; we don't repeat the notification on every cycle
-		allDown := len(newHealthyIPs) == 0
-		if allDown && !dc.swapAllDown(true) {
-			event.Type = notify.EventAllUnhealthy
-			if isLeader {
-				hc.notifier.Notify(ctx, event)
-			}
-		} else if !allDown {
-			dc.swapAllDown(false)
-		}
-
-		// Check if what we publish has changed
+		// Check if the published targets have changed
 		switch {
 		case !isLeader:
-			// Standby: keep tracking health below, but leave DNS and webhooks to the leader
+			// Standby: keep tracking health below, but leave DNS and notifications to the leader
+			dc.needsResync = true
 			domainLog.DebugContext(ctx, "Not the leader, skipping DNS update")
-		case resync || !utils.StringSlicesMatch(prevPub.keys(), newPub.keys()):
+		case dc.needsResync || !targetsMatch(previousTargets, publishTargets):
 			// Update DNS records
-			if len(newHealthyIPs) > 0 {
+			if len(publishTargets) > 0 {
 				var res dns.UpdateResult
-				res, err = dc.provider.UpdateRecords(ctx, dc.checker.GetDomain(), dc.ttl, newPub.targets)
+				res, err = dc.provider.UpdateRecords(ctx, dc.checker.GetDomain(), dc.ttl, publishTargets)
 				if err != nil {
 					domainLog.ErrorContext(ctx, "Error updating DNS records", "error", err)
 					dc.setError("Error updating DNS records: " + err.Error())
-
-					// Notify once per distinct error
-					if dc.swapNotifiedError(err.Error()) != err.Error() {
-						event.Type = notify.EventDNSUpdateFailed
-						event.Error = err.Error()
-						event.Status = notify.StatusUnhealthy
-						hc.notifier.Notify(ctx, event)
-					}
+					hc.notifyUpdateFailed(dc, domainName, endpointStates, publishIPs, previousPublishIPs, err)
 
 					// Continue, so we don't update the cached previous IPs
 					continue
 				}
 
 				dc.swapNotifiedError("")
+				dc.needsResync = false
 				if res.Changed {
-					domainLog.InfoContext(ctx, "Updated DNS records", "targets", event.Published, "priority", newPub.priority, "previous", res.Previous)
-					event.Type = notify.EventDNSUpdated
-					event.Previous = res.Previous
-					hc.notifier.Notify(ctx, event)
+					domainLog.InfoContext(ctx, "Updated DNS records", "targets", publishIPs, "previous", res.Previous)
+					hc.notify(notify.Event{
+						Type:      config.EventDNSUpdated,
+						Domain:    domainName,
+						Endpoints: endpointStates,
+						Published: publishIPs,
+						Previous:  res.Previous,
+					})
 				} else {
-					domainLog.InfoContext(ctx, "DNS records already up to date", "targets", event.Published, "priority", newPub.priority)
+					domainLog.InfoContext(ctx, "DNS records already up to date", "targets", publishIPs)
 				}
 			} else {
 				domainLog.WarnContext(ctx, "No healthy endpoints found, not updating DNS")
+				// Nothing to publish; when an endpoint recovers, the targets change and DNS is updated
+				dc.needsResync = false
 			}
 		default:
-			domainLog.DebugContext(ctx, "Published targets unchanged, skipping DNS update", "healthy", newHealthyIPs, "published", event.Published)
+			domainLog.DebugContext(ctx, "Published targets unchanged, skipping DNS update", "healthy", newHealthyIPs, "published", publishIPs)
 		}
+
+		// Record the state changes, so they match what the status reports
+		dc.recordCycle(results, newHealthyIPs)
 
 		// Update the stored previous IPs
 		dc.setState(newHealthyIPs, failedIPs)
 	}
+}
+
+// endpointTarget returns the target that DNS records should point to for an endpoint
+// The type of the record depends on which key the endpoint uses: an IP address is an A or AAAA record, depending on its family, and cname is a CNAME record
+func endpointTarget(ep *config.ConfigEndpoint) (dns.Target, error) {
+	if ep.CNAME != "" {
+		return dns.CNAMETarget(ep.CNAME, ep.Proxied()), nil
+	}
+	target, err := dns.IPTarget(ep.IP, ep.Proxied())
+	if err != nil {
+		return dns.Target{}, fmt.Errorf("invalid IP for endpoint %s: %w", ep.Name, err)
+	}
+	return target, nil
+}
+
+// resultTarget returns the target that DNS records should point to for the endpoint of a result
+// An endpoint that looks up its IP address publishes the address it found
+func resultTarget(r checker.Result) (dns.Target, error) {
+	if !r.Endpoint.Dynamic() {
+		return endpointTarget(r.Endpoint)
+	}
+
+	target, err := dns.IPTarget(r.Target, r.Endpoint.Proxied())
+	if err != nil {
+		return dns.Target{}, fmt.Errorf("invalid IP for endpoint %s: %w", r.Endpoint.Name, err)
+	}
+	return target, nil
+}
+
+// targetsFor returns the targets for the keys, skipping those that are not known
+func targetsFor(targets map[string]dns.Target, keys []string) []dns.Target {
+	res := make([]dns.Target, 0, len(keys))
+	for _, key := range keys {
+		t, ok := targets[key]
+		if ok {
+			res = append(res, t)
+		}
+	}
+	return res
+}
+
+// targetsMatch returns true if both lists have the same targets, regardless of the order
+func targetsMatch(a, b []dns.Target) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, t := range a {
+		if !slices.Contains(b, t) {
+			return false
+		}
+	}
+	return true
 }

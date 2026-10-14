@@ -25,6 +25,8 @@ type leaderAddrKey struct{}
 // leaderAware returns a function that registers an API route on the mux
 // On a standby, the request is forwarded to the leader, so everyone sees the leader's view and "check now" runs where it matters
 // The request is answered locally when this instance is the leader, when there's no election, when the leader is unknown, or when the leader can't be reached
+// The response carries the build of this instance in X-Ddup-Build, not the leader's: the page was served by this instance, and that is the build the page must be compared with
+// With a rolling update the leader may run another build than the standby, and a header with the leader's build would make the page reload to chase it
 func (s *Server) leaderAware(mux *http.ServeMux) func(pattern string, handler http.HandlerFunc) {
 	transport := &http.Transport{
 		DialContext:           (&net.Dialer{Timeout: 2 * time.Second}).DialContext,
@@ -41,6 +43,11 @@ func (s *Server) leaderAware(mux *http.ServeMux) func(pattern string, handler ht
 				pr.Out.Header.Set(headerForwarded, "1")
 			},
 			Transport: transport,
+			// The middleware has already set the build of this instance on the response: drop the one from the leader, because the proxy would add it as a second value
+			ModifyResponse: func(res *http.Response) error {
+				res.Header.Del(headerBuild)
+				return nil
+			},
 			// Runs when the leader is unreachable: fall back to our own answer
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				slog.WarnContext(r.Context(), "Failed to forward request to the leader, answering locally", slog.Any("error", err))

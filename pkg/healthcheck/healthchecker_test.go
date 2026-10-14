@@ -2,10 +2,7 @@ package healthcheck
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -15,7 +12,6 @@ import (
 	"github.com/italypaleale/ddup/pkg/config"
 	"github.com/italypaleale/ddup/pkg/dns"
 	"github.com/italypaleale/ddup/pkg/healthcheck/checker"
-	"github.com/italypaleale/ddup/pkg/notify"
 )
 
 func TestHealthChecker_AllHealthy(t *testing.T) {
@@ -465,124 +461,6 @@ func TestHealthChecker_FirstRunIgnoresRecoverAfter(t *testing.T) {
 	assert.Equal(t, []string{"1.1.1.1"}, hc.domainCheckers["example.com"].healthyIPs)
 }
 
-func TestHealthChecker_Webhooks(t *testing.T) {
-	events := make(chan notify.Event, 10)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var ev notify.Event
-		_ = json.NewDecoder(r.Body).Decode(&ev)
-		events <- ev
-	}))
-	defer srv.Close()
-
-	n, err := notify.New([]config.ConfigWebhook{{Name: "t", URL: srv.URL, Method: "POST", Attempts: 1, Timeout: time.Second}})
-	require.NoError(t, err)
-
-	mockProvider := dns.NewMockProvider(false)
-	ep1 := &config.ConfigEndpoint{Name: "endpoint1", IP: "1.1.1.1"}
-	ep2 := &config.ConfigEndpoint{Name: "endpoint2", IP: "2.2.2.2"}
-	mockChecker := &checker.MockChecker{
-		Domain:      "example.com",
-		MaxAttempts: 1,
-		Results:     []checker.Result{{Endpoint: ep1, Healthy: true}, {Endpoint: ep2, Healthy: true}},
-	}
-	hc := &HealthChecker{
-		notifier: n,
-		domainCheckers: map[string]*domainChecker{
-			"example.com": {checker: mockChecker, ttl: 60, failedIPs: make(map[string]int), provider: mockProvider},
-		},
-	}
-
-	next := func() notify.Event {
-		n.Wait(5 * time.Second)
-		select {
-		case ev := <-events:
-			return ev
-		default:
-			return notify.Event{}
-		}
-	}
-
-	// Startup: records are published
-	hc.checkAndUpdateDNS(t.Context())
-	ev := next()
-	assert.Equal(t, notify.EventDNSUpdated, ev.Type)
-	assert.Equal(t, notify.StatusHealthy, ev.Status)
-	assert.ElementsMatch(t, []string{"1.1.1.1", "2.2.2.2"}, ev.Healthy)
-
-	// Nothing changes: no event
-	hc.checkAndUpdateDNS(t.Context())
-	assert.Empty(t, next().Type)
-
-	// Everything goes down: one all_unhealthy event, and not repeated on the next cycle
-	mockChecker.Results = []checker.Result{{Endpoint: ep1, Healthy: false, Error: errors.New("x")}, {Endpoint: ep2, Healthy: false, Error: errors.New("x")}}
-	hc.checkAndUpdateDNS(t.Context())
-	ev = next()
-	assert.Equal(t, notify.EventAllUnhealthy, ev.Type)
-	assert.Equal(t, notify.StatusUnhealthy, ev.Status)
-	assert.Len(t, ev.Endpoints, 2)
-	hc.checkAndUpdateDNS(t.Context())
-	assert.Empty(t, next().Type)
-
-	// Recovery of one endpoint publishes it
-	mockChecker.Results[0] = checker.Result{Endpoint: ep1, Healthy: true}
-	hc.checkAndUpdateDNS(t.Context())
-	ev = next()
-	assert.Equal(t, notify.EventDNSUpdated, ev.Type)
-	assert.Equal(t, []string{"1.1.1.1"}, ev.Healthy)
-
-	// Provider errors are notified once per distinct error
-	mockProvider.ShouldError = true
-	mockChecker.Results[1] = checker.Result{Endpoint: ep2, Healthy: true}
-	hc.checkAndUpdateDNS(t.Context())
-	failed := next()
-	assert.Equal(t, notify.EventDNSUpdateFailed, failed.Type)
-	assert.Equal(t, notify.StatusUnhealthy, failed.Status, "a failed update is unhealthy even if the endpoints are up")
-	hc.checkAndUpdateDNS(t.Context())
-	assert.Empty(t, next().Type)
-}
-
-func TestHealthChecker_NoNotificationWhenDNSAlreadyUpToDate(t *testing.T) {
-	events := make(chan notify.Event, 10)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var ev notify.Event
-		_ = json.NewDecoder(r.Body).Decode(&ev)
-		events <- ev
-	}))
-	defer srv.Close()
-
-	n, err := notify.New([]config.ConfigWebhook{{Name: "t", URL: srv.URL, Method: "POST", Attempts: 1, Timeout: time.Second}})
-	require.NoError(t, err)
-
-	// The provider reports that DNS already matched, like on startup after a restart
-	mockProvider := dns.NewMockProvider(false)
-	mockProvider.NoChange = true
-	ep := &config.ConfigEndpoint{Name: "endpoint1", IP: "1.1.1.1"}
-	mockChecker := &checker.MockChecker{Domain: "example.com", MaxAttempts: 2, Results: []checker.Result{{Endpoint: ep, Healthy: true}}}
-	hc := &HealthChecker{
-		notifier: n,
-		domainCheckers: map[string]*domainChecker{
-			"example.com": {checker: mockChecker, ttl: 60, failedIPs: make(map[string]int), provider: mockProvider},
-		},
-	}
-
-	hc.checkAndUpdateDNS(t.Context())
-	n.Wait(5 * time.Second)
-
-	assert.Equal(t, 1, mockProvider.CallCount)
-	assert.Equal(t, []string{"1.1.1.1"}, hc.domainCheckers["example.com"].healthyIPs, "state is still recorded")
-	assert.Empty(t, events, "no event when DNS did not change")
-
-	// A real change carries what DNS held before
-	mockProvider.NoChange = false
-	mockProvider.Previous = []string{"9.9.9.9"}
-	mockChecker.Results = []checker.Result{{Endpoint: ep, Healthy: true}, {Endpoint: &config.ConfigEndpoint{Name: "e2", IP: "2.2.2.2"}, Healthy: true}}
-	hc.checkAndUpdateDNS(t.Context())
-	n.Wait(5 * time.Second)
-	ev := <-events
-	assert.Equal(t, notify.EventDNSUpdated, ev.Type)
-	assert.Equal(t, []string{"9.9.9.9"}, ev.Previous)
-}
-
 func TestHealthChecker_ForceCheck(t *testing.T) {
 	// Not running: no Run loop to handle the request
 	var idle HealthChecker
@@ -647,263 +525,6 @@ func TestHealthChecker_ForceCheck(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestHealthChecker_PriorityTiers(t *testing.T) {
-	mockProvider := dns.NewMockProvider(false)
-	us := &config.ConfigEndpoint{Name: "us", IP: "1.1.1.1"}
-	eu := &config.ConfigEndpoint{Name: "eu", IP: "2.2.2.2"}
-	tunnel := &config.ConfigEndpoint{Name: "tunnel", CNAME: "tunnel.example.com", Proxied: true, Priority: 1}
-
-	up := func(ep *config.ConfigEndpoint) checker.Result { return checker.Result{Endpoint: ep, Healthy: true} }
-	down := func(ep *config.ConfigEndpoint) checker.Result {
-		return checker.Result{Endpoint: ep, Healthy: false, Error: errors.New("down")}
-	}
-
-	mockChecker := &checker.MockChecker{Domain: "example.com", MaxAttempts: 1}
-	hc := &HealthChecker{
-		domainCheckers: map[string]*domainChecker{
-			"example.com": {
-				checker:   mockChecker,
-				ttl:       60,
-				failedIPs: make(map[string]int),
-				provider:  mockProvider,
-				endpoints: map[string]*config.ConfigEndpoint{"1.1.1.1": us, "2.2.2.2": eu, "tunnel.example.com": tunnel},
-			},
-		},
-	}
-	dc := hc.domainCheckers["example.com"]
-
-	run := func(results ...checker.Result) {
-		t.Helper()
-		mockChecker.Results = results
-		hc.checkAndUpdateDNS(t.Context())
-	}
-	published := func() []string {
-		v := make([]string, 0, len(mockProvider.LastTargets))
-		for _, tg := range mockProvider.LastTargets {
-			v = append(v, tg.Value)
-		}
-		return v
-	}
-
-	// Everything healthy: only the preferred tier is published, the standby is not
-	run(up(us), up(eu), up(tunnel))
-	assert.ElementsMatch(t, []string{"1.1.1.1", "2.2.2.2"}, published())
-	assert.Equal(t, 1, mockProvider.CallCount)
-	status := hc.GetDomainStatus("example.com")
-	activeByIP := map[string]bool{}
-	for _, e := range status.Endpoints {
-		activeByIP[e.IP] = e.Active
-		if e.IP == "tunnel.example.com" {
-			assert.Equal(t, "CNAME", e.Type)
-			assert.Equal(t, 1, e.Priority)
-			assert.True(t, e.Proxied)
-		}
-	}
-	assert.Equal(t, map[string]bool{"1.1.1.1": true, "2.2.2.2": true, "tunnel.example.com": false}, activeByIP)
-
-	// The standby going down doesn't change what's published, so DNS isn't touched
-	run(up(us), up(eu), down(tunnel))
-	assert.Equal(t, 1, mockProvider.CallCount)
-	run(up(us), up(eu), up(tunnel))
-	assert.Equal(t, 1, mockProvider.CallCount)
-
-	// One of the preferred endpoints goes down: the other is still published alone
-	run(down(us), up(eu), up(tunnel))
-	assert.Equal(t, []string{"2.2.2.2"}, published())
-	assert.Equal(t, 2, mockProvider.CallCount)
-
-	// Both preferred endpoints are down: fall back to the proxied CNAME
-	run(down(us), down(eu), up(tunnel))
-	require.Len(t, mockProvider.LastTargets, 1)
-	assert.Equal(t, dns.Target{Value: "tunnel.example.com", Proxied: true}, mockProvider.LastTargets[0])
-	assert.Equal(t, 3, mockProvider.CallCount)
-
-	// Recovery of a preferred endpoint goes back to it
-	run(up(us), down(eu), up(tunnel))
-	assert.Equal(t, []string{"1.1.1.1"}, published())
-	assert.Equal(t, 4, mockProvider.CallCount)
-
-	// Everything down: DNS is left alone
-	run(down(us), down(eu), down(tunnel))
-	assert.Equal(t, 4, mockProvider.CallCount)
-	assert.Empty(t, dc.healthyIPs)
-}
-
-func TestHealthChecker_TierChangeEvent(t *testing.T) {
-	events := make(chan notify.Event, 10)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var ev notify.Event
-		_ = json.NewDecoder(r.Body).Decode(&ev)
-		events <- ev
-	}))
-	defer srv.Close()
-	n, err := notify.New([]config.ConfigWebhook{{Name: "t", URL: srv.URL, Method: "POST", Attempts: 1, Timeout: time.Second}})
-	require.NoError(t, err)
-
-	us := &config.ConfigEndpoint{Name: "us", IP: "1.1.1.1"}
-	tunnel := &config.ConfigEndpoint{Name: "tunnel", CNAME: "tunnel.example.com", Proxied: true, Priority: 1}
-	mockChecker := &checker.MockChecker{Domain: "example.com", MaxAttempts: 1}
-	hc := &HealthChecker{
-		notifier: n,
-		domainCheckers: map[string]*domainChecker{
-			"example.com": {
-				checker: mockChecker, ttl: 60, failedIPs: make(map[string]int), provider: dns.NewMockProvider(false),
-				endpoints: map[string]*config.ConfigEndpoint{"1.1.1.1": us, "tunnel.example.com": tunnel},
-			},
-		},
-	}
-
-	mockChecker.Results = []checker.Result{{Endpoint: us, Healthy: true}, {Endpoint: tunnel, Healthy: true}}
-	hc.checkAndUpdateDNS(t.Context())
-	n.Wait(5 * time.Second)
-	<-events
-
-	mockChecker.Results = []checker.Result{{Endpoint: us, Healthy: false, Error: errors.New("down")}, {Endpoint: tunnel, Healthy: true}}
-	hc.checkAndUpdateDNS(t.Context())
-	n.Wait(5 * time.Second)
-	ev := <-events
-	assert.Equal(t, notify.EventDNSUpdated, ev.Type)
-	assert.Equal(t, notify.StatusWarning, ev.Status, "traffic failed over to the backup: some endpoints are down")
-	assert.Equal(t, []string{"tunnel.example.com"}, ev.Published)
-	assert.Equal(t, 1, ev.Tier)
-	assert.Equal(t, 0, ev.PreviousTier)
-	assert.Equal(t, "example.com now points to tunnel", ev.Subject(), "the title shows the name of the endpoint, not its address")
-	assert.Contains(t, ev.Text(), "Priority: 1 (was 0)")
-}
-
-func TestHealthChecker_DynamicIP(t *testing.T) {
-	mockProvider := dns.NewMockProvider(false)
-	// A DDNS-style endpoint: no fixed target, proxied, with a lookup that returns the current address
-	home := &config.ConfigEndpoint{Name: "home", Proxied: true, IPLookup: &config.ConfigIPLookup{URLs: []string{"https://ip.example.com"}}}
-	mockChecker := &checker.MockChecker{Domain: "home.example.com", MaxAttempts: 2}
-	hc := &HealthChecker{
-		domainCheckers: map[string]*domainChecker{
-			"home.example.com": {checker: mockChecker, ttl: 60, failedIPs: make(map[string]int), provider: mockProvider},
-		},
-	}
-	dc := hc.domainCheckers["home.example.com"]
-
-	run := func(target string, healthy bool) {
-		t.Helper()
-		var err error
-		if !healthy {
-			err = errors.New("lookup failed")
-		}
-		mockChecker.Results = []checker.Result{{Endpoint: home, Target: target, Healthy: healthy, Error: err}}
-		hc.checkAndUpdateDNS(t.Context())
-	}
-
-	// First lookup publishes the address, with the settings of the endpoint
-	run("203.0.113.1", true)
-	assert.Equal(t, 1, mockProvider.CallCount)
-	assert.Equal(t, []dns.Target{{Value: "203.0.113.1", Proxied: true}}, mockProvider.LastTargets)
-
-	// Nothing changes
-	run("203.0.113.1", true)
-	assert.Equal(t, 1, mockProvider.CallCount)
-
-	// The address changes: DNS is updated, and the proxied setting carries over
-	run("203.0.113.2", true)
-	assert.Equal(t, 2, mockProvider.CallCount)
-	assert.Equal(t, []dns.Target{{Value: "203.0.113.2", Proxied: true}}, mockProvider.LastTargets)
-	assert.Equal(t, []string{"203.0.113.2"}, dc.healthyIPs)
-
-	// A failed lookup is reported against the last address, and DNS is left alone while there are retries left
-	run("203.0.113.2", false)
-	assert.Equal(t, 2, mockProvider.CallCount)
-	assert.Equal(t, []string{"203.0.113.2"}, dc.healthyIPs)
-	assert.Equal(t, 1, dc.failedIPs["203.0.113.2"])
-
-	// A new lookup that works resets it
-	run("203.0.113.2", true)
-	assert.Empty(t, dc.failedIPs)
-
-	// An endpoint that has never found an address is ignored, and DNS is not touched
-	other := &config.ConfigEndpoint{Name: "other", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://ip.example.com"}}}
-	mockChecker.Results = []checker.Result{{Endpoint: other, Target: "", Healthy: false, Error: errors.New("lookup failed")}}
-	dc.healthyIPs = nil
-	hc.checkAndUpdateDNS(t.Context())
-	assert.Equal(t, 2, mockProvider.CallCount)
-	assert.Empty(t, dc.failedIPs)
-
-	// Old addresses are forgotten, so the endpoints of the domain don't grow forever
-	for i := 3; i < 8; i++ {
-		run("203.0.113."+string(rune('0'+i)), true)
-	}
-	assert.LessOrEqual(t, len(dc.getEndpoints()), 2)
-}
-
-func TestHealthChecker_DynamicIP_SameAddressFromTwoLookups(t *testing.T) {
-	mockProvider := dns.NewMockProvider(false)
-	primary := &config.ConfigEndpoint{Name: "primary", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://a.example.com"}}}
-	fallback := &config.ConfigEndpoint{Name: "fallback", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://b.example.com"}}}
-	mockChecker := &checker.MockChecker{Domain: "home.example.com", MaxAttempts: 2}
-	hc := &HealthChecker{
-		domainCheckers: map[string]*domainChecker{
-			"home.example.com": {checker: mockChecker, ttl: 60, failedIPs: make(map[string]int), provider: mockProvider},
-		},
-	}
-
-	// Both lookups find the same address: it must be published once
-	mockChecker.Results = []checker.Result{
-		{Endpoint: primary, Target: "203.0.113.1", Healthy: true},
-		{Endpoint: fallback, Target: "203.0.113.1", Healthy: true},
-	}
-	hc.checkAndUpdateDNS(t.Context())
-	assert.Equal(t, 1, mockProvider.CallCount)
-	assert.Equal(t, []dns.Target{{Value: "203.0.113.1"}}, mockProvider.LastTargets)
-	assert.Equal(t, []string{"203.0.113.1"}, hc.domainCheckers["home.example.com"].healthyIPs)
-}
-
-func TestDedupeResults(t *testing.T) {
-	a := &config.ConfigEndpoint{Name: "a", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://a.example.com"}}}
-	b := &config.ConfigEndpoint{Name: "b", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://b.example.com"}}}
-	static := &config.ConfigEndpoint{Name: "static", IP: "198.51.100.1"}
-	noAddr := &config.ConfigEndpoint{Name: "none", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://c.example.com"}}}
-
-	in := []checker.Result{
-		{Endpoint: a, Target: "203.0.113.1", Healthy: false},
-		{Endpoint: b, Target: "203.0.113.1", Healthy: true},
-		{Endpoint: static, Target: "198.51.100.1", Healthy: true},
-		{Endpoint: noAddr},
-		{Endpoint: noAddr},
-	}
-	out := dedupeResults(in)
-	require.Len(t, out, 4)
-	assert.Equal(t, "b", out[0].Endpoint.Name, "a healthy result wins over an unhealthy one")
-	assert.Equal(t, "static", out[1].Endpoint.Name)
-	assert.Equal(t, "none", out[2].Endpoint.Name, "results without a target are kept")
-}
-
-func TestStatusEndpointNames(t *testing.T) {
-	named := &config.ConfigEndpoint{Name: "tunnel", URL: "https://t.example.com", CNAME: "tunnel.example.com"}
-	unnamed := &config.ConfigEndpoint{Name: "https://u.example.com", URL: "https://u.example.com", IP: "2.2.2.2"}
-	lookupDefault := &config.ConfigEndpoint{Name: "https://api.ipify.org", IPLookup: &config.ConfigIPLookup{URLs: []string{"https://api.ipify.org?token=secret"}}}
-
-	assert.Equal(t, "tunnel", displayName(named))
-	assert.Empty(t, displayName(unnamed), "a name that is just the URL is not worth showing")
-	assert.Empty(t, displayName(lookupDefault), "a default name derived from the lookup URL is not worth showing")
-	lookupDefault.Name = "home"
-	assert.Equal(t, "home", displayName(lookupDefault))
-
-	hc := &HealthChecker{
-		domainCheckers: map[string]*domainChecker{
-			"example.com": {
-				healthyIPs: []string{"tunnel.example.com", "2.2.2.2"},
-				failedIPs:  map[string]int{},
-				provider:   dns.NewMockProvider(false),
-				checker:    &checker.MockChecker{MaxAttempts: 2},
-				endpoints:  map[string]*config.ConfigEndpoint{"tunnel.example.com": named, "2.2.2.2": unnamed},
-			},
-		},
-	}
-	names := map[string]string{}
-	for _, e := range hc.GetDomainStatus("example.com").Endpoints {
-		names[e.IP] = e.Name
-	}
-	assert.Equal(t, map[string]string{"tunnel.example.com": "tunnel", "2.2.2.2": ""}, names)
-}
-
 func TestNewHealthChecker(t *testing.T) {
 	cfg := config.Get()
 	prevDomains := cfg.Domains
@@ -935,7 +556,7 @@ func TestNewHealthChecker(t *testing.T) {
 	t.Run("creates a checker for each domain", func(t *testing.T) {
 		p1 := dns.NewMockProvider(false)
 		p2 := dns.NewMockProvider(false)
-		hc, err := NewHealthChecker(map[string]dns.Provider{"p1": p1, "p2": p2}, nil, nil, nil)
+		hc, err := NewHealthChecker(map[string]dns.Provider{"p1": p1, "p2": p2}, nil)
 		require.NoError(t, err)
 		require.Len(t, hc.domainCheckers, 2)
 		assert.NotNil(t, hc.forceCh)
@@ -944,9 +565,7 @@ func TestNewHealthChecker(t *testing.T) {
 		require.NotNil(t, a)
 		assert.Same(t, p1, a.provider)
 		assert.Equal(t, 60, a.ttl)
-		require.Len(t, a.endpoints, 2)
-		assert.Equal(t, 0, a.endpoints["192.0.2.1"].Priority)
-		assert.Equal(t, 1, a.endpoints["192.0.2.2"].Priority)
+		assert.Equal(t, map[string]int{"192.0.2.1": 0, "192.0.2.2": 1}, a.priorities)
 		assert.Equal(t, "a.example.com", a.checker.GetDomain())
 		assert.Equal(t, 3, a.checker.GetMaxAttempts())
 		assert.Equal(t, 2, a.checker.GetRecoverAfter())
@@ -963,7 +582,7 @@ func TestNewHealthChecker(t *testing.T) {
 	})
 
 	t.Run("forced check before Run times out", func(t *testing.T) {
-		hc, err := NewHealthChecker(map[string]dns.Provider{"p1": dns.NewMockProvider(false), "p2": dns.NewMockProvider(false)}, nil, nil, nil)
+		hc, err := NewHealthChecker(map[string]dns.Provider{"p1": dns.NewMockProvider(false), "p2": dns.NewMockProvider(false)}, nil)
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
@@ -973,12 +592,12 @@ func TestNewHealthChecker(t *testing.T) {
 	})
 
 	t.Run("provider not configured", func(t *testing.T) {
-		_, err := NewHealthChecker(map[string]dns.Provider{"p1": dns.NewMockProvider(false)}, nil, nil, nil)
+		_, err := NewHealthChecker(map[string]dns.Provider{"p1": dns.NewMockProvider(false)}, nil)
 		require.ErrorContains(t, err, "domain 'b.example.com' references DNS provider 'p2' that is not configured")
 	})
 
 	t.Run("nil provider", func(t *testing.T) {
-		_, err := NewHealthChecker(map[string]dns.Provider{"p1": dns.NewMockProvider(false), "p2": nil}, nil, nil, nil)
+		_, err := NewHealthChecker(map[string]dns.Provider{"p1": dns.NewMockProvider(false), "p2": nil}, nil)
 		require.ErrorContains(t, err, "DNS provider 'p2' that is not configured")
 	})
 }

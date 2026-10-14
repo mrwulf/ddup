@@ -3,9 +3,6 @@ package healthcheck
 import (
 	"slices"
 	"time"
-
-	"github.com/italypaleale/ddup/pkg/config"
-	"github.com/italypaleale/ddup/pkg/dns"
 )
 
 type DomainStatus struct {
@@ -19,14 +16,16 @@ type DomainStatusEndpoint struct {
 	// Name of the endpoint, if it was given one
 	Name    string `json:"name,omitempty"`
 	Healthy bool   `json:"healthy"`
-	// IP address, or CNAME hostname
+	// What the endpoint publishes: its IP address, or its CNAME hostname
 	IP string `json:"ip"`
-	// Record type published for the endpoint: A, AAAA or CNAME
-	Type     string `json:"type"`
-	Proxied  bool   `json:"proxied,omitempty"`
-	Priority int    `json:"priority"`
+	// Type of the DNS record for the endpoint: "A", "AAAA" or "CNAME"
+	Type string `json:"type,omitempty"`
+	// True if the record is proxied by the DNS provider
+	Proxied bool `json:"proxied,omitempty"`
+	// Lower values are preferred: only the healthy endpoints with the lowest value are published
+	Priority int `json:"priority,omitempty"`
 	// True if the endpoint is published in DNS: it's healthy and has the lowest priority value among the healthy endpoints
-	Active       bool `json:"active"`
+	Active       bool `json:"active,omitempty"`
 	FailureCount int  `json:"failureCount,omitempty"`
 	// When the endpoint last changed state, from healthy to failing or the other way around
 	Since *time.Time `json:"since,omitempty"`
@@ -56,32 +55,30 @@ func (hc *HealthChecker) GetDomainStatus(domain string) *DomainStatus {
 
 func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 	healthy, unhealthy, lastUpdated, lastError := dc.getState()
+	targets := dc.getTargets()
+	priorities := dc.getPriorities()
+	published := selectLowestPriority(priorities, healthy)
 
 	// Endpoints in the unhealthy list could also be in the healthy one,
 	// if they failed a recent health check but still less than the max attempts
-	byTarget := dc.getEndpoints()
-	published := selectPublication(byTarget, healthy).values()
-	newEndpoint := func(target string, healthy bool, failureCount int) DomainStatusEndpoint {
+	newEndpoint := func(ip string, isHealthy bool, failureCount int) DomainStatusEndpoint {
 		e := DomainStatusEndpoint{
-			Healthy:      healthy,
-			IP:           target,
-			Type:         dns.Target{Value: target}.RecordType(),
-			Active:       healthy && slices.Contains(published, target),
+			Name:         dc.getName(ip),
+			Healthy:      isHealthy,
+			IP:           ip,
+			Priority:     priorities[ip],
+			Active:       isHealthy && slices.Contains(published, ip),
+			Type:         targets[ip].Type,
+			Proxied:      targets[ip].Proxied,
 			FailureCount: failureCount,
 		}
-		times := dc.getTimes(target)
+		times := dc.getTimes(ip)
 		if times != nil {
 			e.Since = &times.since
 			e.SinceStart = times.sinceStart
 			if !times.lastFailure.IsZero() {
 				e.LastFailure = &times.lastFailure
 			}
-		}
-		ep := byTarget[target]
-		if ep != nil {
-			e.Priority = ep.Priority
-			e.Proxied = ep.Proxied
-			e.Name = displayName(ep)
 		}
 		return e
 	}
@@ -105,17 +102,5 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 		Provider:    dc.provider.Name(),
 		Error:       lastError,
 		Endpoints:   endpoints,
-	}
-}
-
-// displayName returns the name of the endpoint, or an empty string if it's just the default (derived from its URL), which is not worth showing
-func displayName(ep *config.ConfigEndpoint) string {
-	switch {
-	case ep.Name == ep.URL:
-		return ""
-	case ep.Dynamic() && ep.URL == "" && ep.Name == config.RedactURL(ep.IPLookup.URLs[0]):
-		return ""
-	default:
-		return ep.Name
 	}
 }

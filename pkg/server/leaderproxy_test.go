@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/italypaleale/ddup/pkg/buildinfo"
 	"github.com/italypaleale/ddup/pkg/config"
 )
 
@@ -81,17 +80,17 @@ func TestLeaderProxy(t *testing.T) {
 		got = nil
 		startLeader(t, leader)
 
-		rec := serve(t, &fakeElector{leader: true, leaderID: "127.0.0.1"}, http.MethodGet, "/api/info", nil)
+		rec := serve(t, &fakeElector{leader: true, leaderID: "127.0.0.1"}, http.MethodGet, "/api/status", nil)
 		assert.Nil(t, got)
 		assert.Empty(t, rec.Header().Get("X-From"))
-		assert.Contains(t, rec.Body.String(), buildinfo.AppVersion)
+		assert.Contains(t, rec.Body.String(), "a.example.com")
 	})
 
 	t.Run("a request already forwarded is not forwarded again", func(t *testing.T) {
 		got = nil
 		startLeader(t, leader)
 
-		rec := serve(t, &fakeElector{leaderID: "127.0.0.1"}, http.MethodGet, "/api/info", map[string]string{headerForwarded: "1"})
+		rec := serve(t, &fakeElector{leaderID: "127.0.0.1"}, http.MethodGet, "/api/status", map[string]string{headerForwarded: "1"})
 		assert.Nil(t, got)
 		assert.Equal(t, http.StatusOK, rec.Code)
 	})
@@ -101,7 +100,7 @@ func TestLeaderProxy(t *testing.T) {
 		startLeader(t, leader)
 
 		for _, id := range []string{"", "ddup-abc", "evil.example.com"} {
-			rec := serve(t, &fakeElector{leaderID: id}, http.MethodGet, "/api/info", nil)
+			rec := serve(t, &fakeElector{leaderID: id}, http.MethodGet, "/api/status", nil)
 			assert.Nil(t, got, "leader id %q", id)
 			assert.Equal(t, http.StatusOK, rec.Code, "leader id %q", id)
 			assert.Empty(t, rec.Header().Get("X-From"))
@@ -123,9 +122,9 @@ func TestLeaderProxy(t *testing.T) {
 		cfg.Server.Port = port
 		t.Cleanup(func() { cfg.Server.Port = prev })
 
-		rec := serve(t, &fakeElector{leaderID: "127.0.0.1"}, http.MethodGet, "/api/info", nil)
+		rec := serve(t, &fakeElector{leaderID: "127.0.0.1"}, http.MethodGet, "/api/status", nil)
 		assert.Equal(t, http.StatusOK, rec.Code)
-		assert.Contains(t, rec.Body.String(), buildinfo.AppVersion)
+		assert.Contains(t, rec.Body.String(), "a.example.com")
 	})
 
 	t.Run("health checks are never forwarded", func(t *testing.T) {
@@ -135,5 +134,41 @@ func TestLeaderProxy(t *testing.T) {
 		rec := serve(t, &fakeElector{leaderID: "127.0.0.1"}, http.MethodGet, "/healthz", nil)
 		assert.Nil(t, got)
 		assert.Equal(t, http.StatusNoContent, rec.Code)
+	})
+}
+
+func TestLeaderProxyBuildHeader(t *testing.T) {
+	// A leader running another build, as during a rolling update
+	const leaderBuild = "9.9.9|leader-build|abcdef"
+	leader := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(headerBuild, leaderBuild)
+		_, _ = w.Write([]byte(`{"from":"leader"}`))
+	})
+
+	t.Run("a forwarded response carries the build of the standby, once", func(t *testing.T) {
+		startLeader(t, leader)
+
+		rec := serve(t, &fakeElector{leaderID: "127.0.0.1"}, http.MethodGet, "/api/status", nil)
+		assert.Contains(t, rec.Body.String(), "leader", "the body is the leader's")
+
+		local := newBuildInfo().Build
+		require.NotEqual(t, leaderBuild, local)
+		assert.Equal(t, []string{local}, rec.Result().Header.Values(headerBuild), "exactly one value, and it is the local build")
+	})
+
+	t.Run("a response answered locally carries the local build", func(t *testing.T) {
+		rec := serve(t, &fakeElector{leader: true}, http.MethodGet, "/api/status", nil)
+		assert.Equal(t, []string{newBuildInfo().Build}, rec.Result().Header.Values(headerBuild))
+	})
+
+	t.Run("an error from the leader is still labeled with the local build", func(t *testing.T) {
+		startLeader(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set(headerBuild, leaderBuild)
+			http.Error(w, "boom", http.StatusInternalServerError)
+		}))
+
+		rec := serve(t, &fakeElector{leaderID: "127.0.0.1"}, http.MethodGet, "/api/status", nil)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Equal(t, []string{newBuildInfo().Build}, rec.Result().Header.Values(headerBuild))
 	})
 }

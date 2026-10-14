@@ -70,16 +70,12 @@ func TestHealthChecker_Priorities(t *testing.T) {
 			MaxAttempts:  maxAttempts,
 			RecoverAfter: recoverAfter,
 		}
-		byTarget := make(map[string]*config.ConfigEndpoint, len(endpoints))
-		for _, ep := range endpoints {
-			byTarget[ep.Target()] = ep
-		}
 		dc := &domainChecker{
-			checker:   mc,
-			ttl:       60,
-			endpoints: byTarget,
-			failedIPs: make(map[string]int),
-			provider:  provider,
+			checker:    mc,
+			ttl:        60,
+			priorities: endpointPriorities(endpoints),
+			failedIPs:  make(map[string]int),
+			provider:   provider,
 		}
 		hc := &HealthChecker{
 			domainCheckers: map[string]*domainChecker{"example.com": dc},

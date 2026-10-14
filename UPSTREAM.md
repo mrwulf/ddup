@@ -3,7 +3,7 @@
 This file is specific to this fork: it tracks what has been, and still has to be, submitted to
 [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup). It must not be part of any upstream PR.
 
-Last reviewed: 2026-10-14 (dates are UTC). Upstream `main` is `23ac0bb` (AWS Route53 and Google Cloud DNS), and this fork's `main` records it as merged.
+Last reviewed: 2026-10-14 (dates are UTC). This copy describes the branch `integration/fork`; see "State of the branch". Upstream `main` is `23ac0bb` (AWS Route53 and Google Cloud DNS), and this fork's `main` records it as merged.
 go-kit (the maintainer's library, [italypaleale/go-kit](https://github.com/italypaleale/go-kit)) is at v1.5.0; this fork's `go.mod` still uses 1.4.1 until [#40](https://github.com/ItalyPaleAle/ddup/pull/40) merges.
 
 ## Syncing with upstream
@@ -76,78 +76,45 @@ Always branch PRs from `upstream/main` and apply only the listed changes; never 
 | [#32](https://github.com/ItalyPaleAle/ddup/issues/32) | `mise.toml` for the development tools | Open (kept to remember); the maintainer wants a `DEVELOPMENT.md` and Makefile targets instead of mise, and removed `make gen-config` | [#36](https://github.com/ItalyPaleAle/ddup/pull/36). `feat/mise` is not needed |
 | [#33](https://github.com/ItalyPaleAle/ddup/issues/33) | Webhook `vars` | Open; made obsolete by the typed notifications (no templates upstream) | The maintainer can close it; fork-only until [#40](https://github.com/ItalyPaleAle/ddup/pull/40) |
 
-## What the fork has that upstream does not
+## State of the branch `integration/fork`
+
+A test of "the fork as it would be if upstream merged all our open PRs as they are". It is upstream `main` (`23ac0bb`) with #35 to #40 merged (branch `integration/open-prs`, with the integration fixes described in `scratch/integration/conflicts.md`), and the fork-only features on top, one commit each.
+`main` is not changed by it. The deployed configuration has to change to run it: see `scratch/integration/cluster-migration.md`.
+
+### Fork-only on top
 
 | Feature | Where | Status |
 | :------ | :---- | :----- |
-| Leader election and standby request forwarding | `pkg/leader`, `pkg/server/leaderproxy.go`, `leaderElection` | Declined (#30). Fork-only on purpose; every other feature must work with it off |
-| `cname` endpoints and `proxied` on the endpoint, typed DNS targets (`dns.Target`) | `pkg/dns`, `pkg/config` | Open upstream PR [#38](https://github.com/ItalyPaleAle/ddup/pull/38) (different config key) |
-| Dynamic IP: per-endpoint `ipLookup: {urls, family, pattern}` | `pkg/healthcheck/checker/iplookup.go` | Open upstream PR [#39](https://github.com/ItalyPaleAle/ddup/pull/39) (different config) |
-| Templated `webhooks` with `vars`, retries, status tags | `pkg/notify` | Open upstream PR [#40](https://github.com/ItalyPaleAle/ddup/pull/40) replaces them with typed `notifications` |
-| "Since" timestamps in a tooltip (`since`, `sinceStart`, `lastFailure` in the status API) | `pkg/healthcheck/status.go`, dashboard | Open upstream PR [#37](https://github.com/ItalyPaleAle/ddup/pull/37) (popover) |
-| Version footer from `GET /api/info` | `pkg/server`, dashboard | Open upstream PR [#35](https://github.com/ItalyPaleAle/ddup/pull/35) (different mechanism) |
-| Endpoint rows with names, priority, standby and failed-check chips, a legend, and the published set and tier in the status API and webhooks | dashboard, `pkg/healthcheck/tiers.go`, `status.go` | Issue [#27](https://github.com/ItalyPaleAle/ddup/issues/27), after #38 to #40. Not a PR yet |
+| Leader election and standby request forwarding | `pkg/leader`, `pkg/server/leaderproxy.go`, `leaderElection` | Declined (#30). Fork-only on purpose; every other feature must work with it off. Notifications are gated by `isLeader` too; a standby tracks outages without announcing them; the forwarded response carries the standby's own `X-Ddup-Build` |
 | Theme switcher (system, light, dark) | `dashboard/src/lib/theme.ts` | Declined (#20). Fork-only on purpose |
-| `FORK.md`, `screenshots/`, this file, the fork's README sections | | Fork-only on purpose; keep them out of upstream PRs |
-| Release tags `v0.6.0-fork.N` and the publish workflow for the image | `.github/workflows` | Fork-only on purpose |
+| Endpoint rows: names, priority, published or standby, CNAME and proxied chips, failed-check chip, legend, ordered by priority; `name`, `priority` and `active` in the status API | dashboard, `pkg/healthcheck/status.go`, `endpointnames.go` | Issue [#27](https://github.com/ItalyPaleAle/ddup/issues/27), after #38 to #40. Not a PR yet |
+| `FORK.md`, `screenshots/` (stale, see below), this file, the fork's README sections | | Fork-only on purpose |
+| The regression test of the deployed configuration | `pkg/config/testdata/deployment-like.yaml`, `pkg/healthcheck/deployment_test.go` | Fork-only; keep it passing |
 
-The providers are now the same as upstream's (Azure, Cloudflare, OVH, AWS Route53, Google Cloud DNS), with one difference: every provider takes `[]Target`, and the ones that only publish A/AAAA records reject CNAME and proxied targets.
+### What the open PRs replace
 
-## Adoption plan
+| Fork code | Replaced by |
+| :-------- | :---------- |
+| `GET /api/info` and the footer fetched at runtime | #35 (server-side injection, `X-Ddup-Build`, reload on upgrade) |
+| The "since" tooltip | #36 is docs only; #37 (History popover) |
+| `proxied` on the endpoint, `Target.RecordType()` guessing | #38 (`providerOptions.cloudflare.proxied`, explicit `Target.Type`, `Capabilities()`) |
+| Per-endpoint `ipLookup`, the sequential fallback, the lookup cache | #39 (`ipLookupFamily`, `ipLookupURLs`, `pkg/iplookup`, raced services) |
+| Templated `webhooks` with `vars` | #40 (typed `notifications`, go-kit 1.5.0) |
 
-When an upstream PR merges: port its content by hand (the maintainer may change it before merging, so compare with the merged commit, not with our branch), delete the fork's own code for it, migrate the deployed config in the same deploy (upstream rejects unknown keys, so an old key is a startup error), then record the merge with `-s ours`.
-The probable order is below.
+### Behaviors the fork loses or changes
 
-### 1. #36 `DEVELOPMENT.md` and Makefile targets
+Intended (an upstream PR replaces them): templates, headers, custom method and the JSON catch-all receiver of the webhooks; email retries; the backoff (fixed `retryInterval`); the tier line, `standby`, per-endpoint error and status emoji in the text; ntfy priority urgent (5) for an outage; private destinations need `allowPrivateDestinations`; services of an IP lookup are raced, https only, no redirects, no proxy variables, no shared cache; `since` is a popover; the footer has no build date; `/api/info` is gone.
+Also from upstream `main`, not from the open PRs: `expectStatus` is one code or `2xx` (the fork accepted a list, ranges and classes).
+Decisions for the user: endpoint names in notification titles (`0167787`; the titles list addresses now), a build date in the footer, a name in the History popover (it lists addresses), `IPv4 lookup` shown as the name of an unnamed lookup endpoint (the fork hid it), `priority` and `active` omitted from the status API when zero or false.
 
-Adds `DEVELOPMENT.md`, the Makefile targets `dashboard`, `build`, `run-dev`, `lint-dashboard`, `test-e2e` and `check`, `/.bin/` in `.gitignore`, and a README link.
-The fork's `Makefile` already equals upstream's, so it applies cleanly. Keep the fork-only text in the README, and add the link at the end. Then the checklist below can point to `make check`.
+### Rebase to-do list, from the integration
 
-### 2. #35 Version footer
-
-- Delete `GET /api/info`, `buildInfoResponse`, `TestInfoEndpoint` and the dashboard code that fetches it.
-- Take the server-side injection (a JSON script element `ddup-build` in `index.html`), the `X-Ddup-Build` header on API responses, and the reload on upgrade (at most 3 tries per server build, 30 seconds apart; no reload without `sessionStorage`).
-- The footer text changes from `ddup <version> · built <date> · <commit>` to `ddup <version> · <short commit>`. The build date is no longer shown.
-- The fork's version string (`0.6.0-fork.N`) still comes from `pkg/buildinfo`, so it appears as before. The fork's e2e test for the footer is replaced by the PR's `build.spec.ts`.
-
-### 3. #37 History popover
-
-- The status API fields stay the same (`since`, `sinceStart`, `lastFailure`, all optional); the Go side should need only a comparison with the PR.
-- Replace the tooltip with the `EndpointHistory` component: a "History" button on the "N/N endpoints healthy" line opens a dialog listing every endpoint of the domain. Replace the fork's e2e test `says since when an endpoint is healthy or failing`, which reads the tooltip.
-
-### 4. #38 `cname` and `providerOptions.cloudflare.proxied`
-
-Config: `proxied: true` on the endpoint becomes
-```yaml
-providerOptions:
-  cloudflare:
-    proxied: true
-```
-`ip` and `cname` stay. The rule "endpoints with the same priority use the same `proxied`" stays, with a new message; `ConfigEndpoint.Proxied` (field) becomes a method.
-The fork's check "cname and proxied are only supported by Cloudflare" goes away: providers declare `Capabilities()` (`Type`, `CNAME`, `ProviderOptions`) and `dns.ValidateConfig` checks the config at startup. **Every provider needs `Capabilities()`, including AWS Route53 and Google Cloud DNS, which only support plain A/AAAA records.** The PR branch has them.
-Code:
-- `Target.RecordType()` (guessing A, AAAA or CNAME from the value) goes; `Target` has an explicit `Type`, built with `dns.IPTarget(ip, proxied)` and `dns.CNAMETarget(host, proxied)`. `IPTargets(...)` and `ipsFromTargets` become `IPTarget` per IP and `plainIPsFromTargets`.
-- The Cloudflare provider is upstream's (the logic matches the fork's: match by type and value, TTL 1 for proxied, overwrite in place between CNAME and A/AAAA, delete first as a fallback).
-- The status API gets `type` and `proxied` per endpoint (the fork has more fields than the PR; keep them). The dashboard chips for CNAME and proxied can read them instead of deriving them.
-- Keep the fork's handling of dynamic-IP endpoints (target known only after a lookup) in the duplicate-target check.
-
-### 5. #39 Dynamic IP over HTTPS
-
-- Config: the fork's per-endpoint `ipLookup: {urls, family, pattern}` becomes `ipLookupFamily: 4` plus `ipLookupURLs: [{url: ..., pattern: ...}]` on the endpoint, or one list at the top level of the config shared by endpoints. Nothing is built in: every service must be listed. `pattern` moves to the entry it applies to (repeat it if it applied to all).
-- Behavior changes: all the services are asked at once and the first valid answer wins (a warning is logged if two disagree), instead of trying them in order; URLs must be `https`; redirects are not followed; the connection is forced to the IP version of `ipLookupFamily`; proxy environment variables are ignored for lookups; the default endpoint name is `IPv4 lookup` or `IPv6 lookup`; there is no cache shared across domains.
-- Delete `pkg/healthcheck/checker/iplookup.go` and its test, `ConfigIPLookup`, `config.RedactURL` (becomes `iplookup.RedactURL`), and the sequential loop. Keep the fork's `Endpoint.Target()`, `dedupeResults`, `noteTargets` and `selectPublication`, which also cover `cname` and `proxied`; drop upstream's `dynamicPriorities`, which the fork does not need.
-- `validateAddress` gets `cname` as a third alternative ("one of ip, cname and ipLookupFamily").
-- Check the lookup client before switching: the fork follows redirects and honors proxy variables.
-
-### 6. #40 Notifications
-
-The fork's `webhooks` with `vars` become typed `notifications` (`ntfy`, `webhooks`, `email`), each entry with a unique `name`:
-- ntfy: `url`, `token` (the bare token; ddup adds `Bearer `), `timeout`, `maxAttempts`, `retryInterval`. **A private in-cluster URL needs `allowPrivateDestinations: true`**, otherwise deliveries fail with a logged error.
-- Email goes through go-kit's emailer: a connection string (SMTP, with `tls=none` for an in-cluster relay, or `resend://<key>?fromAddress=...`) and `to`, one email per address. Secrets are typed fields read with `!file`, so `vars` goes away.
-- Lost: templates, custom headers and method, the JSON catch-all receiver, the Cloudflare Email Service example, email retries (the emailer sends once), the tier line and `standby` in the text, endpoint names in the title (it lists the addresses), the status emoji in the text, the exponential backoff (fixed `retryInterval`; use `maxAttempts: 5` and `retryInterval: 2s` for a similar window).
-- Changed: ntfy priority is not configurable (urgent when nothing is healthy, high when the DNS update failed, the server default otherwise); events are queued per destination (64, new ones dropped when full); error text is cleaned of secrets.
-- Kept in the fork: the `isLeader` gate around the call that queues the event.
-- `go.mod` goes to go-kit v1.5.0.
+- #37 should key its times by the published target (`Endpoint.Target()`, or the looked-up address), not `Endpoint.IP`, which is empty for `cname` and dynamic endpoints; its tests need `withoutTimes` once #38 adds `Type`.
+- #39 should be written against `Endpoint.Target()`, use typed targets in `checkAndUpdateDNS`, say "ip, cname or ipLookupFamily" in its messages, and skip dynamic endpoints in the duplicate-target check of #38.
+- #40 should read the published address of a result (the looked-up address or the CNAME), not `Endpoint.IP`, in `notifyEndpointStates`; `Validate` must assign `err =` where #39 already declared it.
+- Each PR appends fields and methods to `domainChecker` in the same place: moving them to their own files (`since.go`, `lookups.go`, `notifications.go`) avoids most conflicts. Recommended merge order: 36, 35, 37, 38, 39, 40.
+- #35, #36 and #37 were written on `e02794b`; #38 to #40 on `23ac0bb`.
+- The fork's code to keep when they merge: `isLeader` around DNS updates and `notifyOutage`, `needsResync` (cleared when an update succeeds), the endpoint names and `active` in the status.
 
 ## Branches on the fork (listing only, nothing is deleted)
 

@@ -12,6 +12,7 @@ import {
   Clock,
   Search,
   Play,
+  ChevronDown,
   Sun,
   Moon,
   Monitor,
@@ -21,13 +22,14 @@ import {
   Radio,
   CirclePause,
   type LucideIcon,
-  ChevronDown,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme, type Theme } from '@/lib/theme'
+import { apiFetch, pageBuildInfo, type BuildInfo } from '@/lib/build'
 import { setFavicon } from '@/lib/favicon'
 import type { OverallStatus } from '@/lib/favicon-shapes'
 import { StatusIcon } from '@/components/StatusIcon'
+import { EndpointHistory } from '@/components/EndpointHistory'
 
 interface DomainStatusEndpoint {
   // Name of the endpoint, if it has one
@@ -43,11 +45,11 @@ interface DomainStatusEndpoint {
   // True if published in DNS
   active?: boolean
   failureCount?: number
-  // When the endpoint last changed state (RFC 3339)
+  // When the endpoint last changed state, as an RFC 3339 time
   since?: string
-  // True if `since` is when ddup first checked the endpoint, not a state change
+  // True if `since` is when ddup first checked the endpoint
   sinceStart?: boolean
-  // Last time a check failed (RFC 3339)
+  // Last time a check of the endpoint failed
   lastFailure?: string
 }
 
@@ -59,6 +61,11 @@ interface DomainStatus {
 }
 
 type DomainsResponse = Record<string, DomainStatus>
+
+type Domain = {
+  name: string
+  status: DomainStatus
+}
 
 // True if the endpoints have more than one priority, so it matters which of them are published
 const hasTiers = (status: DomainStatus): boolean => new Set(status.endpoints.map((e) => e.priority ?? 0)).size > 1
@@ -83,26 +90,8 @@ const sortEndpoints = (endpoints: DomainStatusEndpoint[]): DomainStatusEndpoint[
       (a.name ?? a.ip).localeCompare(b.name ?? b.ip)
   )
 
-// Formats a timestamp in the browser's locale and time zone
-const formatTime = (value: string): string =>
-  new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })
-
-// Describes since when an endpoint has been healthy or failing, and its last failure if it has recovered
-const statusText = (endpoint: DomainStatusEndpoint): string => {
-  const state = endpoint.healthy ? 'Healthy' : 'Failing'
-  if (!endpoint.since) {
-    return endpoint.healthy ? 'Healthy' : 'Unhealthy'
-  }
-  // For a new endpoint ddup doesn't know when the state started, so it doesn't claim more than it knows
-  const since = formatTime(endpoint.since)
-  let text = endpoint.sinceStart ? `${state} since ddup started (${since})` : `${state} since ${since}`
-  if (endpoint.healthy && endpoint.lastFailure) {
-    text += ` (last failure ${formatTime(endpoint.lastFailure)})`
-  }
-  return text
-}
-
-// A small icon (with an optional label) that explains itself on hover; all share the same style so they read as one set
+// A small icon (with an optional label) that explains itself on hover and to screen readers
+// Every state has its own shape and a text, so none relies on color alone
 const Chip = ({
   icon: Icon,
   label,
@@ -122,10 +111,13 @@ const Chip = ({
     )}
   >
     <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-    {label && <span>{label}</span>}
+    {label && <span aria-hidden="true">{label}</span>}
     <span className="sr-only">{title}</span>
   </span>
 )
+
+// Classes of the chip of an endpoint that is published in DNS
+const publishedChipClass = 'border-green-600/40 text-green-600 dark:border-green-400/40 dark:text-green-400'
 
 // One segment of the summary bar: the count of domains with a health status
 // The label is only shown from the sm breakpoint up, and stays available to screen readers
@@ -157,14 +149,14 @@ const SummarySegment = ({
 
 const themeOrder: Theme[] = ['system', 'light', 'dark']
 const themeIcons: Record<Theme, LucideIcon> = { system: Monitor, light: Sun, dark: Moon }
-const themeLabels: Record<Theme, string> = { system: 'system', light: 'light', dark: 'dark' }
 
 // Icon button that cycles the theme: follow the system, light, dark
+// The label says the current theme and the next, so it does not rely on the icon alone
 const ThemeSwitcher = () => {
   const { theme, setTheme } = useTheme()
   const next = themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length]
   const Icon = themeIcons[theme]
-  const label = `Theme: ${themeLabels[theme]} (click for ${themeLabels[next]})`
+  const label = `Theme: ${theme} (click for ${next})`
 
   return (
     <Button variant="outline" size="icon" onClick={() => setTheme(next)} title={label} aria-label={label}>
@@ -187,12 +179,7 @@ const Legend = () => (
       <Chip icon={Layers} label="n" title="Priority" /> Priority n (lower is preferred)
     </span>
     <span className="inline-flex items-center gap-1.5">
-      <Chip
-        icon={Radio}
-        title="Published in DNS"
-        className="border-green-600/40 text-green-600 dark:border-green-400/40 dark:text-green-400"
-      />{' '}
-      Published in DNS
+      <Chip icon={Radio} title="Published in DNS" className={publishedChipClass} /> Published in DNS
     </span>
     <span className="inline-flex items-center gap-1.5">
       <Chip icon={CirclePause} title="Healthy, on standby" /> Healthy, on standby
@@ -205,25 +192,25 @@ const Legend = () => (
 )
 
 const EndpointRow = ({ endpoint, tiered }: { endpoint: DomainStatusEndpoint; tiered: boolean }) => {
-  const StatusIcon = endpoint.healthy ? CheckCircle : XCircle
+  const StateIcon = endpoint.healthy ? CheckCircle : XCircle
+  const state = endpoint.healthy ? 'Healthy' : 'Unhealthy'
   const failures = endpoint.failureCount ?? 0
   // The name is the main label when there is one, and the address is secondary
   const primary = endpoint.name || endpoint.ip
   const showTarget = !!endpoint.name
-  const status = statusText(endpoint)
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border p-2">
       <div className="flex min-w-0 grow basis-48 items-center gap-2">
-        <span title={status} className="shrink-0">
-          <StatusIcon
+        <span title={state} className="shrink-0">
+          <StateIcon
             className={cn(
               'h-5 w-5',
               endpoint.healthy ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
             )}
             aria-hidden="true"
           />
-          <span className="sr-only">{status}</span>
+          <span className="sr-only">{state}</span>
         </span>
         <div className="min-w-0">
           <div className={cn('truncate text-sm', showTarget ? 'font-medium' : 'font-mono')} title={primary}>
@@ -250,11 +237,7 @@ const EndpointRow = ({ endpoint, tiered }: { endpoint: DomainStatusEndpoint; tie
           <Chip
             icon={endpoint.active ? Radio : CirclePause}
             title={endpoint.active ? 'Published in DNS' : 'Healthy, on standby'}
-            className={
-              endpoint.active
-                ? 'border-green-600/40 text-green-600 dark:border-green-400/40 dark:text-green-400'
-                : undefined
-            }
+            className={endpoint.active ? publishedChipClass : undefined}
           />
         )}
         {failures > 0 && (
@@ -270,32 +253,12 @@ const EndpointRow = ({ endpoint, tiered }: { endpoint: DomainStatusEndpoint; tie
   )
 }
 
-interface BuildInfo {
-  version: string
-  buildId?: string
-  commit?: string
-  buildDate?: string
-}
-
-// The version of the running build, at the bottom of the page
+// The build that served the page, at the bottom of the page
+// The commit is left out when the build doesn't set it (a development build)
 const Footer = ({ info }: { info: BuildInfo }) => {
-  const built = info.buildDate ? new Date(info.buildDate) : null
-  const parts = [
-    `ddup ${info.version}`,
-    built && !Number.isNaN(built.getTime()) ? `built ${built.toLocaleString()}` : null,
-    info.commit ? info.commit.slice(0, 7) : null,
-  ].filter(Boolean)
+  const parts = [`ddup ${info.version}`, info.commit ? info.commit.slice(0, 7) : null].filter(Boolean)
 
-  return (
-    <footer className="pt-2 text-center font-mono text-xs text-muted-foreground" title="Version of this build of ddup">
-      {parts.join(' · ')}
-    </footer>
-  )
-}
-
-type Domain = {
-  name: string
-  status: DomainStatus
+  return <footer className="pt-2 text-center text-xs break-words text-muted-foreground">{parts.join(' · ')}</footer>
 }
 
 const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
@@ -306,13 +269,14 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [isChecking, setIsChecking] = useState(false)
-  const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null)
+  // The domain whose endpoint history is open; only one can be at a time
+  const [historyDomain, setHistoryDomain] = useState<string | null>(null)
 
   const fetchDomains = useCallback(async (): Promise<void> => {
     setIsLoading(true)
     setError(null) // Clear previous errors
     try {
-      const response = await fetch(endpoint + '/api/status')
+      const response = await apiFetch(endpoint + '/api/status')
       if (!response.ok) {
         throw new Error(`HTTP error: ${response.status} ${response.statusText}`)
       }
@@ -350,7 +314,7 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
         setIsLoading(true)
         setError(null)
 
-        const response = await fetch(endpoint + '/api/status', { signal: controller.signal })
+        const response = await apiFetch(endpoint + '/api/status', { signal: controller.signal })
         if (!response.ok) {
           throw new Error(`HTTP error: ${response.status} ${response.statusText}`)
         }
@@ -397,16 +361,6 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
     }
   }, [autoRefresh, endpoint])
 
-  // The version doesn't change while the page is open, so it's loaded once; the footer is left out if that fails
-  useEffect(() => {
-    const controller = new AbortController()
-    fetch(endpoint + '/api/info', { signal: controller.signal })
-      .then((response) => (response.ok ? (response.json() as Promise<BuildInfo>) : null))
-      .then((info) => setBuildInfo(info))
-      .catch(() => undefined)
-    return () => controller.abort()
-  }, [endpoint])
-
   const refreshClicked = async () => {
     await fetchDomains()
   }
@@ -416,7 +370,7 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
     setIsChecking(true)
     setError(null)
     try {
-      const response = await fetch(endpoint + '/api/check', {
+      const response = await apiFetch(endpoint + '/api/check', {
         method: 'POST',
         // The server requires this header, which blocks cross-site requests
         headers: { 'X-Requested-By': 'ddup-dashboard' },
@@ -468,7 +422,7 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
     return domainMatches || endpointMatches
   })
 
-  // The icon of the tab shows the worst status of all the domains (not only the ones matching the search); the title stays as it is
+  // The icon of the tab shows the worst status of all the domains (not only the ones matching the search)
   const overallCounts = {
     warning: domains.filter((d) => getDomainStatus(d) === 'warning').length,
     unhealthy: domains.filter((d) => getDomainStatus(d) === 'unhealthy').length,
@@ -567,7 +521,10 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
             type="text"
             placeholder="Search domains, endpoints or IP addresses..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => {
+              setSearchTerm(e.target.value)
+              setHistoryDomain(null)
+            }}
             className="w-full rounded-md border border-input bg-background px-10 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           />
         </div>
@@ -647,9 +604,19 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
                         {new Date(domain.status.lastUpdated).toLocaleString()}
                       </span>
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      {domain.status.endpoints.filter((e) => e.healthy).length}/{domain.status.endpoints.length}{' '}
-                      endpoints healthy
+                    {/* The history is about the endpoints, so its button is on the line that counts them */}
+                    <div className="flex flex-wrap items-center justify-between gap-x-2 text-sm text-muted-foreground">
+                      <span>
+                        {domain.status.endpoints.filter((e) => e.healthy).length}/{domain.status.endpoints.length}{' '}
+                        endpoints healthy
+                      </span>
+                      <EndpointHistory
+                        domain={domain.name}
+                        lastUpdated={domain.status.lastUpdated}
+                        endpoints={domain.status.endpoints}
+                        open={historyDomain === domain.name}
+                        onOpenChange={(open) => setHistoryDomain(open ? domain.name : null)}
+                      />
                     </div>
                   </CardHeader>
 
@@ -686,9 +653,9 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
           </div>
         )}
 
-        {/* No Results Message */}
         {!error && domains.length > 0 && <Legend />}
 
+        {/* No Results Message */}
         {filteredDomains.length === 0 && searchTerm && !isLoading && (
           <div className="text-center py-8">
             <p className="text-muted-foreground">No domains or endpoints found matching "{searchTerm}"</p>
@@ -709,7 +676,7 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
           </div>
         )}
 
-        {buildInfo && <Footer info={buildInfo} />}
+        {pageBuildInfo && <Footer info={pageBuildInfo} />}
       </div>
     </div>
   )

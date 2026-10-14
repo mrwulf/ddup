@@ -73,6 +73,14 @@ func main() {
 		return
 	}
 
+	// Check that the DNS providers can publish what the endpoints ask for
+	err = dns.ValidateConfig(cfg)
+	if err != nil {
+		shutdowns.Run(log)
+		slogkit.FatalError(log, "Invalid configuration", err)
+		return
+	}
+
 	log.Info("Starting ddup", "build", buildinfo.BuildDescription)
 
 	// Get a context that is canceled when the application receives a termination signal
@@ -101,19 +109,6 @@ func main() {
 		dnsProviders[name] = provider
 	}
 
-	// Init webhook notifier; this is nil if no webhooks are configured
-	notifier, err := notify.New(cfg.Webhooks)
-	if err != nil {
-		shutdowns.Run(log)
-		slogkit.FatalError(log, "Failed to init webhooks", err)
-		return
-	}
-	// Give in-flight webhook deliveries a moment to complete on shutdown
-	shutdowns.Add(func(context.Context) error {
-		notifier.Wait(3 * time.Second)
-		return nil
-	})
-
 	// List of services to run
 	services := make([]servicerunner.Service, 0, 3)
 
@@ -140,12 +135,26 @@ func main() {
 	// Initialize health checker
 	// If there's a non-nil statusProvider, it means we're in the "dashboarddev" mode where we use static data
 	if statusProvider == nil {
-		hc, err := healthcheck.NewHealthChecker(dnsProviders, metrics, notifier, elector)
+		hc, err := healthcheck.NewHealthChecker(dnsProviders, metrics)
 		if err != nil {
 			shutdowns.Run(log)
 			slogkit.FatalError(log, "Failed to init health checker", err)
 			return
 		}
+
+		// Init the notifier, which is nil if no notification is configured
+		// On shutdown, it delivers the notifications still in the queue
+		notifier, err := notify.New(ctx, cfg)
+		if err != nil {
+			shutdowns.Run(log)
+			slogkit.FatalError(log, "Failed to init notifications", err)
+			return
+		}
+		if notifier != nil {
+			hc.SetNotifier(notifier)
+			shutdowns.Add(notifier.Shutdown)
+		}
+		hc.SetElector(elector)
 		services = append(services, hc.Run)
 
 		statusProvider = hc

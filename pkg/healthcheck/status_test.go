@@ -14,24 +14,6 @@ import (
 	"github.com/italypaleale/ddup/pkg/healthcheck/checker"
 )
 
-// Builds the expected status of an IPv4 endpoint without a name, a priority or timestamps
-// It's published (active) if healthy
-func plainEndpoint(ip string, healthy bool, failureCount int) DomainStatusEndpoint {
-	return DomainStatusEndpoint{Healthy: healthy, IP: ip, Type: "A", Active: healthy, FailureCount: failureCount}
-}
-
-// Removes the timestamps from the endpoints of a status, which are covered by since_test.go
-func withoutTimes(endpoints []DomainStatusEndpoint) []DomainStatusEndpoint {
-	res := make([]DomainStatusEndpoint, len(endpoints))
-	for i, e := range endpoints {
-		e.Since = nil
-		e.SinceStart = false
-		e.LastFailure = nil
-		res[i] = e
-	}
-	return res
-}
-
 func TestGetDomainStatus(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -44,8 +26,8 @@ func TestGetDomainStatus(t *testing.T) {
 			healthyIPs: []string{"1.1.1.1", "2.2.2.2"},
 			failedIPs:  map[string]int{},
 			expected: []DomainStatusEndpoint{
-				plainEndpoint("1.1.1.1", true, 0),
-				plainEndpoint("2.2.2.2", true, 0),
+				{Healthy: true, Active: true, IP: "1.1.1.1"},
+				{Healthy: true, Active: true, IP: "2.2.2.2"},
 			},
 		},
 		{
@@ -53,8 +35,8 @@ func TestGetDomainStatus(t *testing.T) {
 			healthyIPs: []string{"1.1.1.1", "2.2.2.2"},
 			failedIPs:  map[string]int{"2.2.2.2": 1},
 			expected: []DomainStatusEndpoint{
-				plainEndpoint("1.1.1.1", true, 0),
-				plainEndpoint("2.2.2.2", true, 1),
+				{Healthy: true, Active: true, IP: "1.1.1.1"},
+				{Healthy: true, Active: true, IP: "2.2.2.2", FailureCount: 1},
 			},
 		},
 		{
@@ -62,8 +44,8 @@ func TestGetDomainStatus(t *testing.T) {
 			healthyIPs: []string{"1.1.1.1"},
 			failedIPs:  map[string]int{"2.2.2.2": 2},
 			expected: []DomainStatusEndpoint{
-				plainEndpoint("1.1.1.1", true, 0),
-				plainEndpoint("2.2.2.2", false, 2),
+				{Healthy: true, Active: true, IP: "1.1.1.1"},
+				{Healthy: false, IP: "2.2.2.2", FailureCount: 2},
 			},
 		},
 		{
@@ -72,8 +54,8 @@ func TestGetDomainStatus(t *testing.T) {
 			healthyIPs: []string{"1.1.1.1"},
 			failedIPs:  map[string]int{"2.2.2.2": 1},
 			expected: []DomainStatusEndpoint{
-				plainEndpoint("1.1.1.1", true, 0),
-				plainEndpoint("2.2.2.2", false, 1),
+				{Healthy: true, Active: true, IP: "1.1.1.1"},
+				{Healthy: false, IP: "2.2.2.2", FailureCount: 1},
 			},
 		},
 		{
@@ -81,8 +63,8 @@ func TestGetDomainStatus(t *testing.T) {
 			healthyIPs: nil,
 			failedIPs:  map[string]int{"1.1.1.1": 5, "2.2.2.2": 1},
 			expected: []DomainStatusEndpoint{
-				plainEndpoint("1.1.1.1", false, 5),
-				plainEndpoint("2.2.2.2", false, 1),
+				{Healthy: false, IP: "1.1.1.1", FailureCount: 5},
+				{Healthy: false, IP: "2.2.2.2", FailureCount: 1},
 			},
 		},
 	}
@@ -136,22 +118,15 @@ func TestGetDomainStatus_AfterChecks(t *testing.T) {
 		return checker.Result{Endpoint: ep, Healthy: false, Error: errors.New("down")}
 	}
 
-	bothEndpoints := map[string]*config.ConfigEndpoint{"1.1.1.1": ep1, "2.2.2.2": ep2}
-	named := func(name, ip string, healthy bool, failureCount int) DomainStatusEndpoint {
-		e := plainEndpoint(ip, healthy, failureCount)
-		e.Name = name
-		return e
-	}
-
-	newHC := func(mc *checker.MockChecker, endpoints map[string]*config.ConfigEndpoint) *HealthChecker {
+	newHC := func(mc *checker.MockChecker, priorities map[string]int) *HealthChecker {
 		return &HealthChecker{
 			domainCheckers: map[string]*domainChecker{
 				"example.com": {
-					checker:   mc,
-					ttl:       60,
-					failedIPs: make(map[string]int),
-					endpoints: endpoints,
-					provider:  dns.NewMockProvider(false),
+					checker:    mc,
+					ttl:        60,
+					failedIPs:  make(map[string]int),
+					priorities: priorities,
+					provider:   dns.NewMockProvider(false),
 				},
 			},
 		}
@@ -159,72 +134,67 @@ func TestGetDomainStatus_AfterChecks(t *testing.T) {
 
 	t.Run("endpoint failing at startup is listed", func(t *testing.T) {
 		mc := &checker.MockChecker{Domain: "example.com", MaxAttempts: 3, Results: []checker.Result{healthy(ep1), unhealthy(ep2)}}
-		hc := newHC(mc, bothEndpoints)
+		hc := newHC(mc, nil)
 
 		hc.checkAndUpdateDNS(t.Context())
 		assert.ElementsMatch(t, []DomainStatusEndpoint{
-			named("endpoint1", "1.1.1.1", true, 0),
-			named("endpoint2", "2.2.2.2", false, 1),
+			{Healthy: true, Active: true, IP: "1.1.1.1", Type: "A"},
+			{Healthy: false, IP: "2.2.2.2", Type: "A", FailureCount: 1},
 		}, withoutTimes(hc.GetDomainStatus("example.com").Endpoints))
 
 		hc.checkAndUpdateDNS(t.Context())
 		assert.ElementsMatch(t, []DomainStatusEndpoint{
-			named("endpoint1", "1.1.1.1", true, 0),
-			named("endpoint2", "2.2.2.2", false, 2),
+			{Healthy: true, Active: true, IP: "1.1.1.1", Type: "A"},
+			{Healthy: false, IP: "2.2.2.2", Type: "A", FailureCount: 2},
 		}, withoutTimes(hc.GetDomainStatus("example.com").Endpoints))
 	})
 
 	t.Run("recovering endpoint stays unhealthy until it is added back", func(t *testing.T) {
 		mc := &checker.MockChecker{Domain: "example.com", MaxAttempts: 1, RecoverAfter: 2, Results: []checker.Result{healthy(ep1), healthy(ep2)}}
-		hc := newHC(mc, bothEndpoints)
+		hc := newHC(mc, nil)
 		hc.checkAndUpdateDNS(t.Context())
 
 		// The endpoint fails and is removed
 		mc.Results = []checker.Result{healthy(ep1), unhealthy(ep2)}
 		hc.checkAndUpdateDNS(t.Context())
 		assert.ElementsMatch(t, []DomainStatusEndpoint{
-			named("endpoint1", "1.1.1.1", true, 0),
-			named("endpoint2", "2.2.2.2", false, 1),
+			{Healthy: true, Active: true, IP: "1.1.1.1", Type: "A"},
+			{Healthy: false, IP: "2.2.2.2", Type: "A", FailureCount: 1},
 		}, withoutTimes(hc.GetDomainStatus("example.com").Endpoints))
 
 		// First successful check: still recovering
 		mc.Results = []checker.Result{healthy(ep1), healthy(ep2)}
 		hc.checkAndUpdateDNS(t.Context())
 		assert.ElementsMatch(t, []DomainStatusEndpoint{
-			named("endpoint1", "1.1.1.1", true, 0),
-			named("endpoint2", "2.2.2.2", false, 1),
+			{Healthy: true, Active: true, IP: "1.1.1.1", Type: "A"},
+			{Healthy: false, IP: "2.2.2.2", Type: "A", FailureCount: 1},
 		}, withoutTimes(hc.GetDomainStatus("example.com").Endpoints))
 
 		// Second successful check: added back
 		hc.checkAndUpdateDNS(t.Context())
 		assert.ElementsMatch(t, []DomainStatusEndpoint{
-			named("endpoint1", "1.1.1.1", true, 0),
-			named("endpoint2", "2.2.2.2", true, 0),
+			{Healthy: true, Active: true, IP: "1.1.1.1", Type: "A"},
+			{Healthy: true, Active: true, IP: "2.2.2.2", Type: "A"},
 		}, withoutTimes(hc.GetDomainStatus("example.com").Endpoints))
 	})
 
 	t.Run("standby endpoint is healthy even if not published", func(t *testing.T) {
-		standby := &config.ConfigEndpoint{Name: "endpoint2", IP: "2.2.2.2", Priority: 1}
-		mc := &checker.MockChecker{Domain: "example.com", MaxAttempts: 2, Results: []checker.Result{healthy(ep1), healthy(&config.ConfigEndpoint{Name: "endpoint2", IP: "2.2.2.2", Priority: 1})}}
-		hc := newHC(mc, map[string]*config.ConfigEndpoint{"1.1.1.1": ep1, "2.2.2.2": standby})
+		mc := &checker.MockChecker{Domain: "example.com", MaxAttempts: 2, Results: []checker.Result{healthy(ep1), healthy(ep2)}}
+		hc := newHC(mc, map[string]int{"1.1.1.1": 0, "2.2.2.2": 1})
 		mockProvider := dns.NewMockProvider(false)
 		hc.domainCheckers["example.com"].provider = mockProvider
 
 		hc.checkAndUpdateDNS(t.Context())
 		assert.Equal(t, []string{"1.1.1.1"}, mockProvider.LastIPs)
-		// The standby endpoint is healthy but not published
-		expectedStandby := named("endpoint2", "2.2.2.2", true, 0)
-		expectedStandby.Priority = 1
-		expectedStandby.Active = false
 		assert.ElementsMatch(t, []DomainStatusEndpoint{
-			named("endpoint1", "1.1.1.1", true, 0),
-			expectedStandby,
+			{Healthy: true, Active: true, IP: "1.1.1.1", Type: "A"},
+			{Healthy: true, IP: "2.2.2.2", Type: "A", Priority: 1},
 		}, withoutTimes(hc.GetDomainStatus("example.com").Endpoints))
 	})
 
 	t.Run("DNS error is reported", func(t *testing.T) {
 		mc := &checker.MockChecker{Domain: "example.com", MaxAttempts: 2, Results: []checker.Result{healthy(ep1)}}
-		hc := newHC(mc, bothEndpoints)
+		hc := newHC(mc, nil)
 		hc.domainCheckers["example.com"].provider = dns.NewMockProvider(true)
 
 		before := time.Now()
@@ -233,6 +203,18 @@ func TestGetDomainStatus_AfterChecks(t *testing.T) {
 		assert.Contains(t, status.Error, "mock error")
 		assert.False(t, status.LastUpdated.Before(before))
 	})
+}
+
+// withoutTimes clears the fields about state changes, which since_test.go covers
+func withoutTimes(endpoints []DomainStatusEndpoint) []DomainStatusEndpoint {
+	res := make([]DomainStatusEndpoint, len(endpoints))
+	for i, e := range endpoints {
+		e.Since = nil
+		e.SinceStart = false
+		e.LastFailure = nil
+		res[i] = e
+	}
+	return res
 }
 
 func TestGetAllDomainsStatus(t *testing.T) {
@@ -254,24 +236,21 @@ func TestGetAllDomainsStatus(t *testing.T) {
 
 	all := hc.GetAllDomainsStatus()
 	require.Len(t, all, 2)
-	assert.Equal(t, []DomainStatusEndpoint{plainEndpoint("1.1.1.1", true, 0)}, all["a.example.com"].Endpoints)
+	assert.Equal(t, []DomainStatusEndpoint{{Healthy: true, Active: true, IP: "1.1.1.1"}}, all["a.example.com"].Endpoints)
 	assert.Empty(t, all["a.example.com"].Error)
-	assert.Equal(t, []DomainStatusEndpoint{plainEndpoint("2.2.2.2", false, 3)}, all["b.example.com"].Endpoints)
+	assert.Equal(t, []DomainStatusEndpoint{{Healthy: false, IP: "2.2.2.2", FailureCount: 3}}, all["b.example.com"].Endpoints)
 	assert.Equal(t, "Error updating DNS records: boom", all["b.example.com"].Error)
 }
 
 // The dashboard depends on these field names: see the DomainStatus interface in dashboard/src/components/DomainMonitorDashboard.tsx
 func TestDomainStatusJSON(t *testing.T) {
-	since := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
-	lastFailure := time.Date(2026, 1, 2, 2, 0, 0, 0, time.UTC)
 	status := DomainStatus{
 		LastUpdated: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 		Provider:    "cf",
 		Error:       "boom",
 		Endpoints: []DomainStatusEndpoint{
-			{Healthy: true, IP: "192.0.2.1", Type: "A", Active: true},
-			{Healthy: false, IP: "2001:db8::1", Type: "AAAA", FailureCount: 3},
-			{Name: "tunnel", Healthy: true, IP: "tunnel.example.com", Type: "CNAME", Proxied: true, Priority: 2, Since: &since, SinceStart: true, LastFailure: &lastFailure},
+			{Healthy: true, Active: true, IP: "192.0.2.1"},
+			{Healthy: false, IP: "2001:db8::1", FailureCount: 3},
 		},
 	}
 	enc, err := json.Marshal(status)
@@ -281,9 +260,8 @@ func TestDomainStatusJSON(t *testing.T) {
 		"provider": "cf",
 		"error": "boom",
 		"endpoints": [
-			{"healthy": true, "ip": "192.0.2.1", "type": "A", "priority": 0, "active": true},
-			{"healthy": false, "ip": "2001:db8::1", "type": "AAAA", "priority": 0, "active": false, "failureCount": 3},
-			{"name": "tunnel", "healthy": true, "ip": "tunnel.example.com", "type": "CNAME", "proxied": true, "priority": 2, "active": false, "since": "2026-01-02T03:00:00Z", "sinceStart": true, "lastFailure": "2026-01-02T02:00:00Z"}
+			{"healthy": true, "active": true, "ip": "192.0.2.1"},
+			{"healthy": false, "ip": "2001:db8::1", "failureCount": 3}
 		]
 	}`, string(enc))
 

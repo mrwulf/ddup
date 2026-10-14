@@ -6,32 +6,47 @@ import (
 	"sync"
 	"time"
 
-	"github.com/italypaleale/ddup/pkg/config"
 	"github.com/italypaleale/ddup/pkg/dns"
 	"github.com/italypaleale/ddup/pkg/healthcheck/checker"
 )
 
 type domainChecker struct {
-	lock       sync.Mutex
-	checker    checker.Checker
-	ttl        int
-	healthyIPs []string
-	failedIPs  map[string]int
-	provider   dns.Provider
-	// Endpoints by target (IP or CNAME hostname); may be nil, in which case all targets have priority 0 and are not proxied
-	// Endpoints that look up their IP address are added when their address is found, and removed when it's not used any more
-	endpoints   map[string]*config.ConfigEndpoint
+	lock        sync.Mutex
+	checker     checker.Checker
+	ttl         int
+	healthyIPs  []string
+	failedIPs   map[string]int
+	provider    dns.Provider
 	lastUpdated time.Time
 	lastError   string
 
 	// Consecutive successful checks for endpoints that were removed and are recovering
 	recovering map[string]int
-	// True if the last cycle found no healthy endpoints; used to notify only on transitions
-	allDown bool
-	// Last update error that webhooks were notified about; used to avoid repeating the same notification
+
+	// Priority of each endpoint, by IP
+	priorities map[string]int
+
+	// Name of each endpoint worth showing, by IP; empty for those with the default name
+	names map[string]string
+	// Name of the endpoints that look up their IP address, by the address they found
+	dynamicNames map[string]string
+
+	// Target published for each endpoint, by IP or CNAME hostname
+	targets map[string]dns.Target
+	// Priority of the endpoints that look up their IP address, by the address they found
+	dynamicPriorities map[string]int
+
+	// True after this instance was a standby, until it publishes the targets as the leader
+	// Only used by the health check loop
+	needsResync bool
+
+	// True if no endpoint is healthy, and the all_unhealthy notification was sent
+	allUnhealthy bool
+
+	// Error of the latest failed DNS update, and the dns_update_failed notification was sent
 	notifiedError string
 
-	// When each endpoint last changed state and last failed, by target; in memory only
+	// When each endpoint last changed state and last failed, by IP; in memory only
 	times map[string]*endpointTimes
 	// Returns the current time; nil means time.Now
 	clock func() time.Time
@@ -44,9 +59,9 @@ type endpointTimes struct {
 	since time.Time
 	// True until the endpoint changes state for the first time, so `since` is only when ddup first saw it
 	sinceStart bool
-	// Last time a check failed; zero if never
+	// Last time a check of the endpoint failed; zero if never
 	lastFailure time.Time
-	// True if a check of the endpoint ran in the current cycle
+	// True if the endpoint was checked in the current cycle
 	seen bool
 }
 
@@ -57,63 +72,60 @@ func (dc *domainChecker) now() time.Time {
 	return time.Now()
 }
 
-// recordCheck notes the outcome of a single check of an endpoint
-func (dc *domainChecker) recordCheck(target string, healthy bool) {
-	dc.lock.Lock()
-	defer dc.lock.Unlock()
-
-	if dc.times == nil {
-		dc.times = make(map[string]*endpointTimes)
-	}
-	t := dc.times[target]
-	if t == nil {
-		t = &endpointTimes{}
-		dc.times[target] = t
-	}
-	t.seen = true
-	if !healthy {
-		t.lastFailure = dc.now()
-	}
-}
-
-// updateTimes records the state changes after a cycle, given the targets that are healthy now
-// Endpoints that were not checked in this cycle are forgotten, unless they are still configured
-func (dc *domainChecker) updateTimes(healthyIPs []string) {
+// recordCycle notes the outcome of a cycle of checks, given the IPs that are healthy after it
+// A failed check that is still within the allowed attempts only updates the last failure, because the endpoint is still healthy
+// Endpoints that were not checked in this cycle are forgotten
+func (dc *domainChecker) recordCycle(results []checker.Result, healthyIPs []string) {
 	dc.lock.Lock()
 	defer dc.lock.Unlock()
 
 	now := dc.now()
-	for target, t := range dc.times {
-		if !t.seen {
-			_, configured := dc.endpoints[target]
-			if !configured {
-				delete(dc.times, target)
-			}
+	if dc.times == nil {
+		dc.times = make(map[string]*endpointTimes, len(results))
+	}
+
+	for _, r := range results {
+		ip := resultIP(r)
+		if ip == "" {
 			continue
 		}
-		t.seen = false
-
-		healthy := slices.Contains(healthyIPs, target)
-		switch {
-		case t.since.IsZero():
-			t.healthy = healthy
-			t.since = now
-			t.sinceStart = true
-		case t.healthy != healthy:
+		t := dc.times[ip]
+		healthy := slices.Contains(healthyIPs, ip)
+		if t == nil {
+			t = &endpointTimes{
+				healthy:    healthy,
+				since:      now,
+				sinceStart: true,
+			}
+			dc.times[ip] = t
+		} else if t.healthy != healthy {
 			t.healthy = healthy
 			t.since = now
 			t.sinceStart = false
 		}
+
+		t.seen = true
+		if !r.Healthy {
+			t.lastFailure = now
+		}
+	}
+
+	for ip, t := range dc.times {
+		if !t.seen {
+			delete(dc.times, ip)
+			continue
+		}
+		t.seen = false
 	}
 }
 
 // getTimes returns a copy of the times for an endpoint, or nil if there are none
-func (dc *domainChecker) getTimes(target string) *endpointTimes {
+func (dc *domainChecker) getTimes(ip string) *endpointTimes {
 	dc.lock.Lock()
 	defer dc.lock.Unlock()
 
-	t := dc.times[target]
-	if t == nil || t.since.IsZero() {
+	t := dc.times[ip]
+	if t == nil {
 		return nil
 	}
 	cp := *t
@@ -162,17 +174,130 @@ func (dc *domainChecker) setRecovering(r map[string]int) {
 	dc.recovering = r
 }
 
-// swapAllDown sets the all-down flag and returns the previous value
-func (dc *domainChecker) swapAllDown(v bool) bool {
+func (dc *domainChecker) setTargets(targets map[string]dns.Target) {
 	dc.lock.Lock()
 	defer dc.lock.Unlock()
 
-	prev := dc.allDown
-	dc.allDown = v
+	dc.targets = targets
+}
+
+// getTargets returns the target published for each endpoint, as of the last check
+func (dc *domainChecker) getTargets() map[string]dns.Target {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	return dc.targets
+}
+
+// notePriorities records the priority of the endpoints that look up their IP address, under the address they found
+// Addresses that are not in the results or in the keep lists are forgotten, so the map doesn't grow when the address changes
+func (dc *domainChecker) notePriorities(results []checker.Result, keep ...[]string) {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	if dc.dynamicPriorities == nil {
+		dc.dynamicPriorities = make(map[string]int)
+	}
+
+	keepSet := make(map[string]struct{})
+	for _, list := range keep {
+		for _, ip := range list {
+			keepSet[ip] = struct{}{}
+		}
+	}
+	for _, r := range results {
+		ip := resultIP(r)
+		if ip == "" {
+			continue
+		}
+		keepSet[ip] = struct{}{}
+		if r.Endpoint.Dynamic() {
+			dc.dynamicPriorities[ip] = r.Endpoint.Priority
+		}
+	}
+
+	maps.DeleteFunc(dc.dynamicPriorities, func(ip string, _ int) bool {
+		_, ok := keepSet[ip]
+		return !ok
+	})
+}
+
+// getPriorities returns the priority of each endpoint, by IP
+func (dc *domainChecker) getPriorities() map[string]int {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	res := make(map[string]int, len(dc.priorities)+len(dc.dynamicPriorities))
+	maps.Copy(res, dc.priorities)
+	maps.Copy(res, dc.dynamicPriorities)
+	return res
+}
+
+// resultIP returns the IP address to publish for the endpoint of a result
+// Endpoints that look up their IP address report what they found, and others have a fixed address
+func resultIP(r checker.Result) string {
+	if r.Target != "" {
+		return r.Target
+	}
+	if r.Endpoint.Dynamic() {
+		return ""
+	}
+	return r.Endpoint.Target()
+}
+
+// dedupeResults keeps one result per IP address
+// Endpoints that look up their IP address can find the same one as another endpoint, and an address must be published only once
+// If one of the results is healthy it wins; otherwise the first is kept
+func dedupeResults(results []checker.Result) []checker.Result {
+	index := make(map[string]int, len(results))
+	out := make([]checker.Result, 0, len(results))
+	for _, r := range results {
+		ip := resultIP(r)
+
+		// Results without an address are kept as they are, since they can't clash with anything
+		if ip == "" {
+			out = append(out, r)
+			continue
+		}
+
+		i, ok := index[ip]
+		switch {
+		case !ok:
+			index[ip] = len(out)
+			out = append(out, r)
+		case r.Healthy && !out[i].Healthy:
+			out[i] = r
+		}
+	}
+	return out
+}
+
+// forgetOtherIPs removes from the maps the IP addresses that are not in the results
+func forgetOtherIPs(results []checker.Result, states ...map[string]int) {
+	current := make(map[string]struct{}, len(results))
+	for _, r := range results {
+		current[resultIP(r)] = struct{}{}
+	}
+
+	for _, m := range states {
+		maps.DeleteFunc(m, func(ip string, _ int) bool {
+			_, ok := current[ip]
+			return !ok
+		})
+	}
+}
+
+// swapAllUnhealthy sets whether the domain has no healthy endpoints, and returns the previous value
+func (dc *domainChecker) swapAllUnhealthy(v bool) bool {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	prev := dc.allUnhealthy
+	dc.allUnhealthy = v
 	return prev
 }
 
-// swapNotifiedError sets the last notified error and returns the previous value
+// swapNotifiedError sets the error of the latest failed DNS update (empty if the update succeeded), and returns the previous value
 func (dc *domainChecker) swapNotifiedError(v string) string {
 	dc.lock.Lock()
 	defer dc.lock.Unlock()
@@ -180,73 +305,4 @@ func (dc *domainChecker) swapNotifiedError(v string) string {
 	prev := dc.notifiedError
 	dc.notifiedError = v
 	return prev
-}
-
-// getEndpoints returns a copy of the endpoints by target
-func (dc *domainChecker) getEndpoints() map[string]*config.ConfigEndpoint {
-	dc.lock.Lock()
-	defer dc.lock.Unlock()
-
-	return maps.Clone(dc.endpoints)
-}
-
-// noteTargets records the endpoints that look up their IP address under the address they found
-// Endpoints whose address is not in the keep list (the current and previous targets) are forgotten
-func (dc *domainChecker) noteTargets(results []checker.Result, keep ...[]string) {
-	dc.lock.Lock()
-	defer dc.lock.Unlock()
-
-	if dc.endpoints == nil {
-		dc.endpoints = make(map[string]*config.ConfigEndpoint)
-	}
-
-	keepSet := make(map[string]struct{})
-	for _, list := range keep {
-		for _, t := range list {
-			keepSet[t] = struct{}{}
-		}
-	}
-
-	for _, r := range results {
-		if r.Endpoint.Dynamic() && r.Target != "" {
-			dc.endpoints[r.Target] = r.Endpoint
-			keepSet[r.Target] = struct{}{}
-		}
-	}
-
-	for target, ep := range dc.endpoints {
-		_, ok := keepSet[target]
-		if !ok && ep.Dynamic() {
-			delete(dc.endpoints, target)
-		}
-	}
-}
-
-// dedupeResults keeps one result per target
-// Endpoints that look up their IP address can find the same one (for example, a primary and a fallback lookup service), and a target must be published only once
-// If one of the results is healthy it wins; otherwise the first is kept
-func dedupeResults(results []checker.Result) []checker.Result {
-	index := make(map[string]int, len(results))
-	out := make([]checker.Result, 0, len(results))
-	for _, r := range results {
-		target := r.Target
-		if target == "" {
-			target = r.Endpoint.Target()
-		}
-		// Results without a target are kept as they are, since they can't clash with anything
-		if target == "" {
-			out = append(out, r)
-			continue
-		}
-
-		i, ok := index[target]
-		switch {
-		case !ok:
-			index[target] = len(out)
-			out = append(out, r)
-		case r.Healthy && !out[i].Healthy:
-			out[i] = r
-		}
-	}
-	return out
 }

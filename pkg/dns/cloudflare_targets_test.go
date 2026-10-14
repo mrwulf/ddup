@@ -208,3 +208,24 @@ func TestProviders_RejectUnsupportedTargets(t *testing.T) {
 	_, err = ovh.UpdateRecords(t.Context(), "app.example.com", 60, []Target{{Value: "1.1.1.1", Proxied: true}})
 	require.ErrorIs(t, err, ErrUnsupportedTarget)
 }
+
+func TestRoute53AndCloudDNS_RejectUnsupportedTargets(t *testing.T) {
+	route53, route53Transport := newAWSRoute53TestProviderWithMock()
+	googleDNS, googleTransport := newGoogleCloudDNSTestProviderWithMock()
+
+	testCases := map[string]Provider{
+		"AWS Route53":      route53,
+		"Google Cloud DNS": googleDNS,
+	}
+	for name, provider := range testCases {
+		t.Run(name, func(t *testing.T) {
+			_, err := provider.UpdateRecords(t.Context(), "app.example.com", 60, []Target{{Value: "tunnel.example.com"}})
+			require.ErrorIs(t, err, ErrUnsupportedTarget)
+			_, err = provider.UpdateRecords(t.Context(), "app.example.com", 60, []Target{{Value: "1.1.1.1", Proxied: true}})
+			require.ErrorIs(t, err, ErrUnsupportedTarget)
+		})
+	}
+
+	assert.Empty(t, route53Transport.GetRequests(), "nothing is sent")
+	assert.Empty(t, googleTransport.GetRequests(), "nothing is sent")
+}

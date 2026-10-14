@@ -3,6 +3,7 @@ package dns
 import (
 	"fmt"
 	"net/netip"
+	"slices"
 )
 
 const (
@@ -41,6 +42,11 @@ func canonicalizeIPs(ips []string) ([]string, error) {
 		}
 	}
 	return canonical, nil
+}
+
+// sortedUniqueIPs returns a sorted copy of the list, without duplicates
+func sortedUniqueIPs(ips []string) []string {
+	return slices.Compact(slices.Sorted(slices.Values(ips)))
 }
 
 func parseIP(ip string) (netip.Addr, error) {

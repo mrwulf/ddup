@@ -609,6 +609,28 @@ Endpoints:
   server2 (192.0.2.11): UNHEALTHY
 ```
 
+### Leader Election
+
+By default ddup is a single instance. On Kubernetes you can run several replicas with `leaderElection`: all of them run the health checks and keep their own state, but only the leader updates DNS and sends notifications, so a replica that takes over finds a warm state. The leader is decided with a `Lease` object.
+
+- `enabled`: Enable leader election (disabled by default)
+- `name`: Name of the Lease (defaults to `ddup`)
+- `namespace`: Namespace of the Lease (defaults to the namespace of the pod)
+- `identity`: Unique ID of the replica (defaults to `$POD_IP`, then `$POD_NAME`, then the hostname)
+- `leaseDuration`, `renewDeadline`, `retryPeriod`: Timing of the election (defaults to `15s`, `10s` and `2s`; each must be longer than the next). A new leader is elected within about `leaseDuration` after the old one crashes, and right away when the leader shuts down cleanly
+
+The service account of the pod needs the permission to `get`, `create` and `update` Leases in the namespace.
+
+What changes with several replicas:
+
+- Only the leader calls the DNS provider and sends notifications. A standby logs `Not the leader, skipping DNS update` at the debug level.
+- When a replica becomes the leader, it publishes the current records again for every domain, in case the old leader stopped in the middle of a change. If the records are already right nothing changes, and no `dns_updated` notification is sent.
+- A domain with no healthy endpoints is announced once. The standbys note the outage without announcing it, so a new leader that takes over during the outage does not send `all_unhealthy` a second time. If the old leader stopped before announcing the outage, nobody announces it, but the recovery is still reported by `dns_updated`.
+- A `dns_update_failed` notification is sent once for each distinct error by the leader that saw it. A new leader sends its own if it hits the same error.
+- Every replica makes its own health checks, so the `since`, `sinceStart` and `lastFailure` times of an endpoint are when that replica saw the change, and `failureCount` is its own count.
+- The API requests (`/api/status`, `/api/check`) that a standby receives are forwarded to the leader, so everyone sees the leader's view and "Check now" runs where it matters. Forwarding needs the identity to be the IP address of the pod, and only works to the port of `server`. If the leader is unknown or can't be reached, the standby answers with its own view. The page and `/healthz` are always served by the replica that receives the request.
+- The forwarded response carries the `X-Ddup-Build` header of the replica that forwarded it, not the leader's. During a rolling update the leader can run an older build than the standby that served the page, and the dashboard must compare its own build with the one that served it: with the leader's build it would reload the page for a build that the next request could not give it. The dashboard also limits how often it reloads for the same build.
+
 ### Server Settings
 
 - `enabled`: Enable the server (disabled by default)

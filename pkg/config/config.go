@@ -44,6 +44,9 @@ type Config struct {
 	// Server contains configuration for the server
 	Server ConfigServer `yaml:"server"`
 
+	// LeaderElection lets multiple replicas run together: all of them check health, only the leader updates DNS and sends notifications
+	LeaderElection ConfigLeaderElection `yaml:"leaderElection"`
+
 	// Dev is meant for development only; it's undocumented
 	Dev ConfigDev `yaml:"-"`
 
@@ -355,6 +358,40 @@ type ConfigServer struct {
 	Port int `yaml:"port"`
 }
 
+// ConfigLeaderElection configures leader election between replicas
+type ConfigLeaderElection struct {
+	// Enable leader election; when false, the instance always acts
+	// +default false
+	Enabled bool `yaml:"enabled"`
+
+	// Kubernetes Lease to use; only "kubernetes" is supported for now
+	// +default "kubernetes"
+	Type string `yaml:"type"`
+
+	// Namespace of the Lease; defaults to the namespace the pod runs in
+	Namespace string `yaml:"namespace"`
+
+	// Name of the Lease
+	// +default "ddup"
+	Name string `yaml:"name"`
+
+	// Unique ID of this replica; defaults to $POD_IP, then $POD_NAME, then the hostname
+	// Standby replicas forward API requests to the leader, which needs the identity to be the pod's IP address
+	Identity string `yaml:"identity"`
+
+	// How long a lease is valid without renewal; this bounds failover time
+	// +default 15s
+	LeaseDuration time.Duration `yaml:"leaseDuration"`
+
+	// How long the leader keeps retrying a renewal before giving up leadership
+	// +default 10s
+	RenewDeadline time.Duration `yaml:"renewDeadline"`
+
+	// How often to try to acquire or renew the lease
+	// +default 2s
+	RetryPeriod time.Duration `yaml:"retryPeriod"`
+}
+
 // ConfigDev includes options using during development only
 type ConfigDev struct {
 	// If true, enables CORS from anywhere
@@ -480,12 +517,47 @@ func (c *Config) Validate(logger *slog.Logger) error {
 		}
 	}
 
+	err = c.validateLeaderElection()
+	if err != nil {
+		return err
+	}
+
 	// Validate the notifications
 	err = c.Notifications.validate()
 	if err != nil {
 		return err
 	}
 
+	return nil
+}
+
+func (c *Config) validateLeaderElection() error {
+	le := &c.LeaderElection
+	if !le.Enabled {
+		return nil
+	}
+	if le.Type == "" {
+		le.Type = "kubernetes"
+	}
+	if le.Type != "kubernetes" {
+		return errors.New("leaderElection.type must be 'kubernetes'")
+	}
+	if le.Name == "" {
+		le.Name = "ddup"
+	}
+	if le.LeaseDuration <= 0 {
+		le.LeaseDuration = 15 * time.Second
+	}
+	if le.RenewDeadline <= 0 {
+		le.RenewDeadline = 10 * time.Second
+	}
+	if le.RetryPeriod <= 0 {
+		le.RetryPeriod = 2 * time.Second
+	}
+	// client-go's own constraints
+	if le.LeaseDuration <= le.RenewDeadline || le.RenewDeadline <= le.RetryPeriod {
+		return errors.New("leaderElection requires leaseDuration > renewDeadline > retryPeriod")
+	}
 	return nil
 }
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/italypaleale/ddup/pkg/config"
 	"github.com/italypaleale/ddup/pkg/healthcheck/checker"
+	"github.com/italypaleale/ddup/pkg/leader"
 	"github.com/italypaleale/ddup/pkg/notify"
 )
 
@@ -42,12 +43,19 @@ func notifyEndpointStates(results []checker.Result, healthyIPs []string) []notif
 	return states
 }
 
+// SetElector sets the object that decides whether this instance may update DNS and send notifications
+// It must be called before Run; without it, the instance always acts
+func (hc *HealthChecker) SetElector(e leader.Elector) {
+	hc.elector = e
+}
+
 // notifyOutage sends the all_unhealthy event when a domain has no healthy endpoints
 // The event is sent once, when the domain transitions to that state, and not on every check
 // The recovery is reported by the dns_updated event that follows
-func (hc *HealthChecker) notifyOutage(dc *domainChecker, domain string, endpoints []notify.EndpointState, previous []string, allUnhealthy bool) {
+// A standby records the transition without sending the event, so a replica that takes over during an outage does not announce it again, and the leader that saw it first is the one that announced it
+func (hc *HealthChecker) notifyOutage(dc *domainChecker, domain string, endpoints []notify.EndpointState, previous []string, allUnhealthy, isLeader bool) {
 	wasUnhealthy := dc.swapAllUnhealthy(allUnhealthy)
-	if !allUnhealthy || wasUnhealthy {
+	if !allUnhealthy || wasUnhealthy || !isLeader {
 		return
 	}
 

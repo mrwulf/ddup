@@ -13,6 +13,7 @@ import (
 	"github.com/italypaleale/ddup/pkg/config"
 	"github.com/italypaleale/ddup/pkg/dns"
 	"github.com/italypaleale/ddup/pkg/healthcheck/checker"
+	"github.com/italypaleale/ddup/pkg/leader"
 	appmetrics "github.com/italypaleale/ddup/pkg/metrics"
 	"github.com/italypaleale/ddup/pkg/notify"
 )
@@ -23,6 +24,9 @@ type HealthChecker struct {
 	domainCheckers map[string]*domainChecker
 	// Optional; may be nil
 	notifier Notifier
+	// Decides whether this instance may update DNS and send notifications; checks always run
+	// Optional; nil means this instance always acts
+	elector leader.Elector
 	// Requests to run a check right away; handled by Run, so checks never overlap
 	forceCh chan forceRequest
 }
@@ -128,6 +132,12 @@ func (hc *HealthChecker) ForceCheck(ctx context.Context) error {
 func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 	var err error
 
+	// Only the leader acts; a standby still tracks state (health, times, whether the domain is down) so it's ready to take over
+	isLeader := hc.elector == nil || hc.elector.IsLeader()
+	// On takeover, assume nothing "published" earlier counts: the old leader may have died mid-change
+	// UpdateRecords is idempotent and reports Changed=false when the records are already right, so this costs one no-op call per domain and sends no duplicate notification
+	// The domain stays marked until an update succeeds, because a standby has already recorded the healthy endpoints, and a failed update would otherwise never be retried
+
 	for domainName, dc := range hc.domainCheckers {
 		domainLog := slog.With("domain", domainName)
 
@@ -216,10 +226,15 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 
 		// Notify when the domain has no healthy endpoints
 		endpointStates := notifyEndpointStates(results, newHealthyIPs)
-		hc.notifyOutage(dc, domainName, endpointStates, previousPublishIPs, len(newHealthyIPs) == 0)
+		hc.notifyOutage(dc, domainName, endpointStates, previousPublishIPs, len(newHealthyIPs) == 0, isLeader)
 
 		// Check if the published targets have changed
-		if !targetsMatch(previousTargets, publishTargets) {
+		switch {
+		case !isLeader:
+			// Standby: keep tracking health below, but leave DNS and notifications to the leader
+			dc.needsResync = true
+			domainLog.DebugContext(ctx, "Not the leader, skipping DNS update")
+		case dc.needsResync || !targetsMatch(previousTargets, publishTargets):
 			// Update DNS records
 			if len(publishTargets) > 0 {
 				var res dns.UpdateResult
@@ -234,6 +249,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 				}
 
 				dc.swapNotifiedError("")
+				dc.needsResync = false
 				if res.Changed {
 					domainLog.InfoContext(ctx, "Updated DNS records", "targets", publishIPs, "previous", res.Previous)
 					hc.notify(notify.Event{
@@ -248,8 +264,10 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 				}
 			} else {
 				domainLog.WarnContext(ctx, "No healthy endpoints found, not updating DNS")
+				// Nothing to publish; when an endpoint recovers, the targets change and DNS is updated
+				dc.needsResync = false
 			}
-		} else {
+		default:
 			domainLog.DebugContext(ctx, "Published targets unchanged, skipping DNS update", "healthy", newHealthyIPs, "published", publishIPs)
 		}
 

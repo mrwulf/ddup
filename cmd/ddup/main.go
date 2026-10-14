@@ -16,6 +16,7 @@ import (
 	"github.com/italypaleale/ddup/pkg/config"
 	"github.com/italypaleale/ddup/pkg/dns"
 	"github.com/italypaleale/ddup/pkg/healthcheck"
+	"github.com/italypaleale/ddup/pkg/leader"
 	appmetrics "github.com/italypaleale/ddup/pkg/metrics"
 	"github.com/italypaleale/ddup/pkg/notify"
 	"github.com/italypaleale/ddup/pkg/server"
@@ -109,7 +110,27 @@ func main() {
 	}
 
 	// List of services to run
-	services := make([]servicerunner.Service, 0, 2)
+	services := make([]servicerunner.Service, 0, 3)
+
+	// Leader election; without it this instance always acts
+	var elector leader.Elector = leader.Always{}
+	if cfg.LeaderElection.Enabled {
+		le := cfg.LeaderElection
+		elector, err = leader.NewKube(leader.KubeOpts{
+			Namespace:     le.Namespace,
+			Name:          le.Name,
+			Identity:      le.Identity,
+			LeaseDuration: le.LeaseDuration,
+			RenewDeadline: le.RenewDeadline,
+			RetryPeriod:   le.RetryPeriod,
+		})
+		if err != nil {
+			shutdowns.Run(log)
+			slogkit.FatalError(log, "Failed to init leader election", err)
+			return
+		}
+	}
+	services = append(services, elector.Run)
 
 	// Initialize health checker
 	// If there's a non-nil statusProvider, it means we're in the "dashboarddev" mode where we use static data
@@ -133,6 +154,7 @@ func main() {
 			hc.SetNotifier(notifier)
 			shutdowns.Add(notifier.Shutdown)
 		}
+		hc.SetElector(elector)
 		services = append(services, hc.Run)
 
 		statusProvider = hc
@@ -142,6 +164,7 @@ func main() {
 	if cfg.Server.Enabled {
 		srv, err := server.NewServer(server.NewServerOpts{
 			HealthChecker: statusProvider,
+			Elector:       elector,
 		})
 		if err != nil {
 			shutdowns.Run(log)

@@ -16,7 +16,21 @@ ddup is **not** a DNS server, instead it works with "dynamic" DNS servers. Curre
 - Google Cloud DNS
 - OVH
 
-![Screenshot of the ddup dashboard, showing the status of domains and their health](screenshot.webp)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/dashboard-dark.webp">
+  <img src="screenshots/dashboard-light.webp" alt="Screenshot of the ddup dashboard, with the status icon in the header, the summary bar, and the domains with their endpoints, failover priorities and health">
+</picture>
+
+The dashboard shows each endpoint's priority and whether it is published in DNS or on standby, CNAME and proxied targets, dynamic DNS records, failed check counts and errors.
+It has a **Check now** button, auto-refresh controls, a summary bar, and a light, dark or system theme.
+The browser tab icon shows the overall status, so it stays visible when many tabs are open and the title is cut off.
+All the data in these images is sample data.
+
+![The ddup tab among other tabs in Chrome, with a green check, a yellow warning triangle and a red cross on its icon for healthy, warning and unhealthy](screenshots/tab-states.webp)
+
+<img src="screenshots/auto-refresh-menu.webp" alt="The auto-refresh menu" width="60%">
+
+This fork adds leader election, the theme switcher and the endpoint rows of the dashboard: see [FORK.md](FORK.md) for each of them and for how they relate to upstream, and [UPSTREAM.md](UPSTREAM.md) for what has been submitted.
 
 ## Installation
 
@@ -36,6 +50,8 @@ docker run \
 ```
 
 > ddup follows semver for versioning. The command above uses the latest version in the 0.x branch. We do not publish a container image tagged "latest".
+
+This fork's images are `ghcr.io/mrwulf/ddup`, tagged with the fork's releases (for example `0.6.0-fork.22`); see [UPSTREAM.md](UPSTREAM.md).
 
 ### Using Docker Compose
 
@@ -114,7 +130,7 @@ You can find an example of the configuration file, and a description of every op
     - `cname`: A hostname to publish in a CNAME record when healthy, as an alternative to `ip`. Exactly one of `ip`, `cname` and `ipLookupFamily` is required. See [CNAME records and Cloudflare proxying](#cname-records-and-cloudflare-proxying)
     - `ipLookupFamily`: `4` or `6`. Instead of a fixed `ip`, ddup looks up the public IP address of the network it runs in and publishes it: `4` creates an A record and `6` an AAAA record. See [Dynamic DNS](#dynamic-dns). Exactly one of `ip`, `cname` and `ipLookupFamily` is required
     - `ipLookupURLs`: Optional, only with `ipLookupFamily`. One or more services for this endpoint, which **replace** the top-level `ipLookupURLs` for it. See [Dynamic DNS](#dynamic-dns)
-    - `priority`: Optional non-negative integer for priority (default: 0). Only the healthy endpoints with the lowest priority value are published, and if none of them are healthy ddup falls back to the next value. When the preferred endpoints are healthy again (after `recoverAfter`, if set), ddup goes back to them. Endpoints with the same priority are all published together. If no endpoint is healthy, DNS is left unchanged
+    - `priority`: Optional non-negative integer for priority (default: 0). Only the healthy endpoints with the lowest priority value are published, and if none of them are healthy ddup falls back to the next value. When the preferred endpoints are healthy again (after `recoverAfter`, if set), ddup goes back to them. Endpoints with the same priority are all published together. If no endpoint is healthy, DNS is left unchanged. Fork only: endpoints that are not published are still health-checked and shown as "standby" in the dashboard
     - `host`: Optional hostname to include in the requests, when the request is made to an IP address or to a hostname different from the desired one
     - `providerOptions`: Optional settings that apply only with a specific DNS provider, under a key named after the provider. Using one with a domain whose provider is different is a configuration error. The only one is `cloudflare`, with `proxied` (see below)
 

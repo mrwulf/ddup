@@ -58,6 +58,13 @@ Configurations that set `detail` would then fail to load, because unknown keys a
 
 **Upstreaming.** A candidate once [#40](https://github.com/ItalyPaleAle/ddup/pull/40) is merged: the names in titles, the errors and the tiers are the most useful part, and upstream may prefer them without a setting. The name logic is self-contained: `EndpointDetail.Label` is filled from `displayName` (the configured name, empty for the default) and `Detail.names` falls back to the address, so upstream could fold `Label` into `EndpointState` directly.
 
+## Build workflow
+
+`.github/workflows/build-and-publish.yaml` builds only the Linux platforms of the container image: amd64, arm64 and armv7.
+Upstream also builds archives for 386, macOS, Windows and FreeBSD.
+Each cold cross-compile takes about 95 seconds, and with all ten the job ran past its time limit and was cancelled, so no image was published.
+This is a candidate for upstream as a separate change, for example by building the extra archives in parallel or only for releases.
+
 ## Regenerating the screenshots
 
 The images come from the dashboard's `dashboarddev` mode, which serves static data instead of running health checks (`cmd/ddup/main_dashboarddev.go`, which uses only example names and documentation addresses).

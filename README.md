@@ -30,7 +30,7 @@ All the data in these images is sample data.
 
 <img src="screenshots/auto-refresh-menu.webp" alt="The auto-refresh menu" width="60%">
 
-This fork adds failover priorities, CNAME and proxied targets, dynamic DNS, webhooks and more: see [FORK.md](FORK.md) for each of them, and for the phone layout.
+This fork adds CNAME and proxied targets, dynamic DNS, templated webhooks, leader election and more: see [FORK.md](FORK.md) for each of them and for how they relate to upstream, and [UPSTREAM.md](UPSTREAM.md) for what has been submitted.
 
 ## Installation
 
@@ -50,6 +50,8 @@ docker run \
 ```
 
 > ddup follows semver for versioning. The command above uses the latest version in the 0.x branch. We do not publish a container image tagged "latest".
+
+This fork's images are `ghcr.io/mrwulf/ddup`, tagged with the fork's releases (for example `0.6.0-fork.22`); see [UPSTREAM.md](UPSTREAM.md).
 
 ### Using Docker Compose
 
@@ -416,6 +418,19 @@ The commented-out Cloudflare example in `config.sample.yaml` sends mail through 
 
 If the API answers 403 with code 10102, the token lacks the permission. Code 10105 means the account isn't entitled to Email Sending, and 10203 means sending is disabled for the zone or account.
 
+### Leader election
+
+Fork only. To run more than one replica on Kubernetes, enable `leaderElection`: all replicas check health, but only the leader updates DNS and sends webhooks.
+
+- `leaderElection.enabled`: Enable leader election (default: false). When false, the instance always acts
+- `leaderElection.type`: Only `kubernetes` (a `Lease`) is supported
+- `leaderElection.name`: Name of the Lease (default: `ddup`)
+- `leaderElection.namespace`: Namespace of the Lease (default: the namespace the pod runs in)
+- `leaderElection.identity`: Unique ID of the replica (default: `$POD_IP`, then `$POD_NAME`, then the hostname). Request forwarding needs it to be the pod's IP address: set `POD_IP` from the downward API (`status.podIP`)
+- `leaderElection.leaseDuration` (default 15s), `renewDeadline` (default 10s) and `retryPeriod` (default 2s): the Lease timings; `leaseDuration` bounds the failover time
+
+The pod's service account needs `get`, `create` and `update` on the Lease. Standby replicas forward API requests to the leader, so every dashboard shows the leader's view; if the leader is unknown or can't be reached, the standby answers itself.
+
 ### Server Settings
 
 - `enabled`: Enable the server (disabled by default)
@@ -426,6 +441,7 @@ The server has no authentication, so keep it on a trusted network. It exposes:
 
 - `GET /api/status` and `GET /api/status/{recordname}`: current status of the domains
 - `POST /api/check`: runs health checks for all domains right away (the dashboard's "Check now" button), and returns the updated status. The request must include the header `X-Requested-By: ddup-dashboard`, which keeps other websites from triggering it through a visitor's browser. If a check finished less than 5 seconds ago, no new one is run. A forced check counts towards `attempts` and `recoverAfter` like a scheduled one, and the next scheduled check is then a full `interval` later
+- `GET /api/info`: version of the build (fork only)
 - `GET /healthz`: returns 204 when the server is up
 
 ### Logging Settings

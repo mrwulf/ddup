@@ -31,6 +31,12 @@ type domainChecker struct {
 	// Priority of the endpoints that look up their IP address, by the address they found
 	dynamicPriorities map[string]int
 
+	// True if no endpoint is healthy, and the all_unhealthy notification was sent
+	allUnhealthy bool
+
+	// Error of the latest failed DNS update, and the dns_update_failed notification was sent
+	notifiedError string
+
 	// When each endpoint last changed state and last failed, by IP; in memory only
 	times map[string]*endpointTimes
 	// Returns the current time; nil means time.Now
@@ -270,4 +276,24 @@ func forgetOtherIPs(results []checker.Result, states ...map[string]int) {
 			return !ok
 		})
 	}
+}
+
+// swapAllUnhealthy sets whether the domain has no healthy endpoints, and returns the previous value
+func (dc *domainChecker) swapAllUnhealthy(v bool) bool {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	prev := dc.allUnhealthy
+	dc.allUnhealthy = v
+	return prev
+}
+
+// swapNotifiedError sets the error of the latest failed DNS update (empty if the update succeeded), and returns the previous value
+func (dc *domainChecker) swapNotifiedError(v string) string {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	prev := dc.notifiedError
+	dc.notifiedError = v
+	return prev
 }

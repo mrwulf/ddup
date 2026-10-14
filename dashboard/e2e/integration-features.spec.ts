@@ -6,6 +6,7 @@ import { expect, test, type Page } from '@playwright/test'
 interface DomainStatusEndpoint {
     healthy: boolean
     ip: string
+    name?: string
     type?: string
     proxied?: boolean
     failureCount?: number
@@ -100,6 +101,31 @@ test.describe('mixed domain with the build info', () => {
 
     test.beforeEach(async ({ page }) => {
         await page.clock.setFixedTime(new Date('2026-10-13T10:00:00Z'))
+    })
+
+    test('the history shows the name of an endpoint above its address', async ({ page }) => {
+        await servePage(page)
+        await mockAPI(page, {
+            'named.example': {
+                lastUpdated: '2026-10-13T09:30:00Z',
+                provider: 'cloudflare',
+                endpoints: [
+                    { healthy: true, ip: '192.0.2.10', name: 'vps-east', type: 'A', since: '2026-10-13T09:00:00Z' },
+                    { healthy: true, ip: '192.0.2.11', type: 'A', since: '2026-10-13T09:00:00Z' },
+                ],
+            },
+        })
+        await page.goto('/')
+
+        await historyButton(page, 'named.example').click()
+        const items = historyDialog(page, 'named.example').getByRole('listitem')
+        await expect(items).toHaveCount(2)
+
+        // A named endpoint shows the name first and the address under it, and an unnamed one shows only the address
+        await expect(items.nth(0)).toContainText('vps-east')
+        await expect(items.nth(0)).toContainText('192.0.2.10')
+        await expect(items.nth(1)).toContainText('192.0.2.11')
+        await expect(items.nth(1)).not.toContainText('vps-east')
     })
 
     test('the history lists the IP, the looked-up address and the CNAME, and the footer is shown', async ({ page }) => {

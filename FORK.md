@@ -43,6 +43,7 @@ The last button in the header cycles the theme between system, light and dark, a
 
 The notifications of upstream PR [#40](https://github.com/ItalyPaleAle/ddup/pull/40) replaced the fork's webhook templates, and their messages lost what the fork used to send. `notifications.detail` (on by default here, `false` to turn it off) brings it back for ntfy, webhooks and email:
 
+- Endpoint names instead of addresses in the titles of `dns_updated` (`example.com now points to server1, server2`) and `dns_update_failed` (`DNS update failed for example.com (wanted server1)`). An endpoint whose name is only the default (its health-check URL, which can contain a token) is shown by its address in titles and in the body; a name that looks like a URL or has credentials is never used.
 - A green, yellow or red circle for the status of the domain in the title and in the `Status` line (ntfy keeps it in the tag only, so it isn't shown twice).
 - The error of the latest check of each unhealthy endpoint, without the endpoint's URL and with the configured secrets removed.
 - On domains with more than one priority, the priority of each endpoint, `healthy (standby)` for a healthy endpoint that is not published, and `Priority: <new> (was <old>)` when a `dns_updated` changes tier.
@@ -55,7 +56,7 @@ Nothing changes in when notifications are sent: only the leader sends them, thro
 **How to drop it.** Delete those two files and their tests, then remove the hooks listed above.
 Configurations that set `detail` would then fail to load, because unknown keys are rejected.
 
-**Upstreaming.** A candidate once [#40](https://github.com/ItalyPaleAle/ddup/pull/40) is merged: the errors and the tiers are the most useful part, and upstream may prefer them without a setting.
+**Upstreaming.** A candidate once [#40](https://github.com/ItalyPaleAle/ddup/pull/40) is merged: the names in titles, the errors and the tiers are the most useful part, and upstream may prefer them without a setting. The name logic is self-contained: `EndpointDetail.Label` is filled from `displayName` (the configured name, empty for the default) and `Detail.names` falls back to the address, so upstream could fold `Label` into `EndpointState` directly.
 
 ## Regenerating the screenshots
 

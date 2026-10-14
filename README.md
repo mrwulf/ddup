@@ -630,6 +630,7 @@ Endpoints:
 
 With `detail: true` (the default in this fork), the messages carry more than the examples above:
 
+- Titles name the endpoints instead of listing their addresses: `example.com now points to server1, server2` for `dns_updated`, and `DNS update failed for example.com (wanted server1)` for `dns_update_failed`. An endpoint without a `name` is shown by its address, because its default name is the URL of its health check, which can contain a token. The same goes for the list of endpoints in the body.
 - The title starts with a green, yellow or red circle for the status of the domain (all, some, or none of the endpoints are healthy), and so does the `Status` line. ntfy titles have no circle, because ntfy shows the status tag before the title.
 - When the domain has more than one priority, each endpoint shows its priority, and a healthy endpoint that is not published is marked `standby`. A `dns_updated` that moves to another tier has a `Priority: <new> (was <old>)` line.
 - An unhealthy endpoint shows the error of its latest check. The URL of the endpoint is removed from it (it can contain a token), and so are the secrets of the configuration. Long errors are cut at 200 characters.
@@ -637,7 +638,7 @@ With `detail: true` (the default in this fork), the messages carry more than the
 `dns_updated` when the primary tier recovers, as a Slack message:
 
 ```text
-🟡 example.com now points to 192.0.2.10
+🟡 example.com now points to server1
 
 Event: dns_updated
 Domain: example.com
@@ -652,6 +653,15 @@ Endpoints:
   server2 (192.0.2.11, priority 0): UNHEALTHY (HTTP request failed: dial tcp 192.0.2.11:443: connect: connection refused)
   backup (192.0.2.20, priority 1): healthy (standby)
 ```
+
+The titles of the same domain for the other events, where `192.0.2.30` is an endpoint without a `name`:
+
+```text
+DNS update failed for example.com (wanted server1, 192.0.2.30)
+No healthy endpoints for example.com
+```
+
+In ntfy these titles have no circle; in emails and webhooks they start with one.
 
 ### Leader Election
 

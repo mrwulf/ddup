@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -18,6 +19,8 @@ type message struct {
 	body     string
 	priority webhook.NtfyPriority
 	tags     []string
+	// Fork extension: title without the status emoji, for ntfy that shows the status with a tag, see detail.go
+	ntfyTitle string
 }
 
 var _ webhook.MessageProvider = message{}
@@ -119,7 +122,7 @@ func (m message) GetSlackMessage() (webhook.SlackMessage, error) {
 func (m message) GetNtfyMessage() (webhook.NtfyMessage, error) {
 	return webhook.NtfyMessage{
 		Message:  m.body,
-		Title:    m.title,
+		Title:    cmp.Or(m.ntfyTitle, m.title),
 		Priority: m.priority,
 		Tags:     m.tags,
 	}, nil

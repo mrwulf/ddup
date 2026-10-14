@@ -25,6 +25,7 @@ func (hc *HealthChecker) notify(ev notify.Event) {
 	if hc.notifier == nil {
 		return
 	}
+	ev.Detail = hc.notifyDetail(ev.Domain)
 	hc.notifier.Notify(ev)
 }
 

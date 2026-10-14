@@ -234,6 +234,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 
 		// Notify when the domain has no healthy endpoints
 		endpointStates := notifyEndpointStates(results, newHealthyIPs)
+		dc.notifyDetail = newNotifyDetail(results, priorities, publishIPs)
 		hc.notifyOutage(dc, domainName, endpointStates, previousPublishIPs, len(newHealthyIPs) == 0, isLeader)
 
 		// Check if the published targets have changed

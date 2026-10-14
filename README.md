@@ -504,6 +504,7 @@ Every notification has an optional `events` list to choose the events to receive
     - `connectionString`: Connection string for the email provider. Required. The supported providers are Resend (`resend://<api-key>?fromAddress=<address>&fromName=<name>`), SMTP (`smtp://<username>:<password>@<host>:<port>?fromAddress=<address>&fromName=<name>&tls=<auto|starttls|implicit|none>`), AWS SES (`awsses://<access-key-id>:<secret-access-key>@<region>?fromAddress=<address>&fromName=<name>`), SendGrid, and `console://` (logs the email instead of sending it, for development). See [go-kit's documentation](https://github.com/ItalyPaleAle/go-kit/tree/main/emailer) for all options
     - `to`: List of recipients. One email is sent to each address. Required
     - `events`: Events to send (default: all)
+  - `detail`: Add the status emoji, the priority tiers and the error of each unhealthy endpoint to every message (default: `true`). Set it to `false` for the messages shown in [Messages](#messages). This is a fork extension (see [FORK.md](FORK.md#detailed-notifications))
 
 `ntfy` and `webhooks` entries also have these optional settings for delivering the request:
 
@@ -624,6 +625,43 @@ Endpoints:
   server1 (192.0.2.10): UNHEALTHY
   server2 (192.0.2.11): UNHEALTHY
 ```
+
+#### Detailed messages
+
+With `detail: true` (the default in this fork), the messages carry more than the examples above:
+
+- Titles name the endpoints instead of listing their addresses: `example.com now points to server1, server2` for `dns_updated`, and `DNS update failed for example.com (wanted server1)` for `dns_update_failed`. An endpoint without a `name` is shown by its address, because its default name is the URL of its health check, which can contain a token. The same goes for the list of endpoints in the body.
+- The title starts with a green, yellow or red circle for the status of the domain (all, some, or none of the endpoints are healthy), and so does the `Status` line. ntfy titles have no circle, because ntfy shows the status tag before the title.
+- When the domain has more than one priority, each endpoint shows its priority, and a healthy endpoint that is not published is marked `standby`. A `dns_updated` that moves to another tier has a `Priority: <new> (was <old>)` line.
+- An unhealthy endpoint shows the error of its latest check. The URL of the endpoint is removed from it (it can contain a token), and so are the secrets of the configuration. Long errors are cut at 200 characters.
+
+`dns_updated` when the primary tier recovers, as a Slack message:
+
+```text
+🟡 example.com now points to server1
+
+Event: dns_updated
+Domain: example.com
+Time: 2026-01-02T03:04:05Z
+Status: 🟡 warning
+Now: 192.0.2.10
+Before: 192.0.2.20
+Priority: 0 (was 1)
+
+Endpoints:
+  server1 (192.0.2.10, priority 0): healthy
+  server2 (192.0.2.11, priority 0): UNHEALTHY (HTTP request failed: dial tcp 192.0.2.11:443: connect: connection refused)
+  backup (192.0.2.20, priority 1): healthy (standby)
+```
+
+The titles of the same domain for the other events, where `192.0.2.30` is an endpoint without a `name`:
+
+```text
+DNS update failed for example.com (wanted server1, 192.0.2.30)
+No healthy endpoints for example.com
+```
+
+In ntfy these titles have no circle; in emails and webhooks they start with one.
 
 ### Leader Election
 

@@ -5,9 +5,13 @@ import (
 )
 
 // endpointPriorities returns the priority of each endpoint, by target (the IP address or the CNAME hostname)
+// Endpoints that look up their IP address are added when the address is found
 func endpointPriorities(endpoints []*config.ConfigEndpoint) map[string]int {
 	res := make(map[string]int, len(endpoints))
 	for _, ep := range endpoints {
+		if ep.Dynamic() {
+			continue
+		}
 		res[ep.Target()] = ep.Priority
 	}
 	return res

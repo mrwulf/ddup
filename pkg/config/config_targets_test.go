@@ -42,12 +42,12 @@ func TestValidateEndpointTarget(t *testing.T) {
 		{
 			name:      "neither ip nor cname",
 			endpoint:  ConfigEndpoint{},
-			expectErr: "domain test.example.com endpoint 0 is invalid: exactly one of ip or cname must be set",
+			expectErr: "domain test.example.com endpoint 0 is invalid: exactly one of ip, cname or ipLookupFamily must be set",
 		},
 		{
 			name:      "both ip and cname",
 			endpoint:  ConfigEndpoint{IP: "192.0.2.10", CNAME: "tunnel.example.net"},
-			expectErr: "domain test.example.com endpoint 0 is invalid: exactly one of ip or cname must be set",
+			expectErr: "domain test.example.com endpoint 0 is invalid: exactly one of ip, cname or ipLookupFamily must be set",
 		},
 		{
 			name:     "cname",

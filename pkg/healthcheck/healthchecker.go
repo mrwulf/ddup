@@ -45,8 +45,12 @@ func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.
 		if !ok || provider == nil {
 			return nil, fmt.Errorf("domain '%s' references DNS provider '%s' that is not configured", d.RecordName, d.Provider)
 		}
+		lookupers, err := buildLookupers(cfg, d)
+		if err != nil {
+			return nil, fmt.Errorf("domain '%s': %w", d.RecordName, err)
+		}
 		dcs[d.RecordName] = &domainChecker{
-			checker:    checker.New(d.RecordName, d.Endpoints, d.HealthChecks, metrics),
+			checker:    checker.New(d.RecordName, d.Endpoints, d.HealthChecks, metrics, lookupers),
 			ttl:        d.TTL,
 			priorities: endpointPriorities(d.Endpoints),
 			failedIPs:  make(map[string]int, 0),
@@ -130,7 +134,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		failedIPs = maps.Clone(failedIPs)
 
 		// Perform health checks for this domain
-		results := dc.checker.CheckAll(ctx)
+		results := dedupeResults(dc.checker.CheckAll(ctx))
 
 		// Collect healthy IPs
 		maxAttempts := dc.checker.GetMaxAttempts()
@@ -139,10 +143,16 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		newHealthyIPs := make([]string, 0, len(results))
 		targets := make(map[string]dns.Target, len(results))
 		for _, result := range results {
-			// The key of an endpoint is what it publishes: its IP address or its CNAME hostname
-			ip := result.Endpoint.Target()
+			// The key of an endpoint is what it publishes: its IP address (the one it looked up, for a dynamic endpoint) or its CNAME hostname
+			ip := resultIP(result)
 
-			target, targetErr := endpointTarget(result.Endpoint)
+			// An endpoint whose IP address has never been found has nothing we can publish or keep track of
+			if ip == "" {
+				domainLog.WarnContext(ctx, "✗ Endpoint has no IP address", "endpoint", result.Endpoint.Name, "error", result.Error)
+				continue
+			}
+
+			target, targetErr := resultTarget(result)
 			if targetErr != nil {
 				// The configuration has been validated, so this indicates a development-time error
 				domainLog.ErrorContext(ctx, "Invalid endpoint", "endpoint", result.Endpoint.Name, "error", targetErr)
@@ -186,13 +196,18 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 				newHealthyIPs = append(newHealthyIPs, ip)
 			}
 		}
+
+		// Forget the state of addresses that endpoints no longer publish, because the address they look up changed
+		forgetOtherIPs(results, failedIPs, recovering)
 		dc.setRecovering(recovering)
 		dc.setTargets(targets)
+		dc.notePriorities(results, currentHealthyIPs, newHealthyIPs)
 
 		// Only the healthy endpoints with the lowest priority value are published
 		// The previous selection is derived from the previous healthy endpoints in the same way, so we only touch DNS when what's published changes
-		publishIPs := selectLowestPriority(dc.priorities, newHealthyIPs)
-		previousPublishIPs := selectLowestPriority(dc.priorities, currentHealthyIPs)
+		priorities := dc.getPriorities()
+		publishIPs := selectLowestPriority(priorities, newHealthyIPs)
+		previousPublishIPs := selectLowestPriority(priorities, currentHealthyIPs)
 		publishTargets := targetsFor(targets, publishIPs)
 		previousTargets := targetsFor(targets, previousPublishIPs)
 
@@ -239,6 +254,20 @@ func endpointTarget(ep *config.ConfigEndpoint) (dns.Target, error) {
 	target, err := dns.IPTarget(ep.IP, ep.Proxied())
 	if err != nil {
 		return dns.Target{}, fmt.Errorf("invalid IP for endpoint %s: %w", ep.Name, err)
+	}
+	return target, nil
+}
+
+// resultTarget returns the target that DNS records should point to for the endpoint of a result
+// An endpoint that looks up its IP address publishes the address it found
+func resultTarget(r checker.Result) (dns.Target, error) {
+	if !r.Endpoint.Dynamic() {
+		return endpointTarget(r.Endpoint)
+	}
+
+	target, err := dns.IPTarget(r.Target, r.Endpoint.Proxied())
+	if err != nil {
+		return dns.Target{}, fmt.Errorf("invalid IP for endpoint %s: %w", r.Endpoint.Name, err)
 	}
 	return target, nil
 }

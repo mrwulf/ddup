@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/italypaleale/ddup/pkg/iplookup"
 )
 
 // Config represents the application configuration
@@ -24,6 +26,11 @@ type Config struct {
 
 	// Domains allows configuring multiple domains, each with its own endpoints
 	Domains []ConfigDomain `yaml:"domains"`
+
+	// List of services used to look up the public IP address of the endpoints that set `ipLookupFamily` and don't have a list of their own
+	// There are no built-in services: ddup contacts only the services that are configured
+	// The services are called over HTTPS: those that apply to an endpoint are asked at the same time, and the first valid answer is used
+	IPLookupURLs []ConfigIPLookupURL `yaml:"ipLookupURLs"` //nolint:tagliatelle // The key keeps the URLs initialism
 
 	// Provider contains shared provider configuration (shared across all domains)
 	Providers map[string]ConfigProvider `yaml:"providers"`
@@ -115,19 +122,30 @@ type ConfigEndpoint struct {
 	Name string `yaml:"name"`
 
 	// Health check URL
-	// +required
+	// Required, unless the endpoint sets `ipLookupFamily`: then the endpoint is not health-checked, and is healthy as long as its IP address can be looked up
 	URL string `yaml:"url"`
 
 	// IP address to include in DNS records when healthy
 	// IPv4 addresses are published as A records and IPv6 addresses as AAAA records
-	// Exactly one of `ip` and `cname` is required
+	// Exactly one of `ip`, `cname` and `ipLookupFamily` is required
 	IP string `yaml:"ip"`
 
 	// Hostname to publish in a CNAME record when healthy
 	// A CNAME record can't coexist with other records, so an endpoint with `cname` must be the only one with its priority
 	// Only supported by some DNS providers
-	// Exactly one of `ip` and `cname` is required
+	// Exactly one of `ip`, `cname` and `ipLookupFamily` is required
 	CNAME string `yaml:"cname"`
+
+	// IP version of the public IP address to look up and include in DNS records when healthy: 4 creates an A record, 6 an AAAA record
+	// This is for dynamic DNS: the record follows the public IP address of the network ddup runs in
+	// Exactly one of `ip`, `cname` and `ipLookupFamily` is required
+	IPLookupFamily int `yaml:"ipLookupFamily"`
+
+	// Optional list of services used to look up the IP address of this endpoint, with one or more entries
+	// It replaces the top-level `ipLookupURLs` for this endpoint: the two lists are not merged
+	// It can only be set together with `ipLookupFamily`, and the `family` of its entries is optional but, if set, must match `ipLookupFamily`
+	// If not set, the entries of the top-level `ipLookupURLs` with the family of the endpoint are used
+	IPLookupURLs []ConfigIPLookupURL `yaml:"ipLookupURLs"` //nolint:tagliatelle // The key keeps the URLs initialism
 
 	// Optional priority of the endpoint
 	// Only the healthy endpoints with the lowest priority value are published: if none of them are healthy, ddup falls back to the next priority
@@ -181,6 +199,65 @@ func (e *ConfigEndpoint) Target() string {
 		return e.CNAME
 	}
 	return e.IP
+}
+
+// ConfigIPLookupURL is a service that returns the public IP address of the caller
+type ConfigIPLookupURL struct {
+	// URL of the service, which must use https
+	// By default the response body is expected to contain only the IP address, as plain text
+	// +required
+	URL string `yaml:"url"`
+
+	// IP version the service answers for: 4 or 6
+	// Required in the top-level `ipLookupURLs`, which serves both versions
+	// Optional on an endpoint, where it's the `ipLookupFamily` of the endpoint: if set, it must be equal to it
+	Family int `yaml:"family"`
+
+	// Optional regular expression with exactly one capture group, to extract the IP address from the response (for example from JSON)
+	// Example: `"ip":"([^"]+)"`
+	Pattern string `yaml:"pattern"`
+}
+
+// Dynamic returns true if the IP address of the endpoint is looked up
+func (e *ConfigEndpoint) Dynamic() bool {
+	return e.IPLookupFamily != 0
+}
+
+// IPLookupSources returns the services used to look up the IP address of an endpoint that sets `ipLookupFamily`
+// These are the services in the list of the endpoint, if it has one, or otherwise those in the top-level list with the family of the endpoint
+// The configuration must have been validated
+func (c *Config) IPLookupSources(e *ConfigEndpoint) ([]iplookup.Source, error) {
+	var (
+		entries  []ConfigIPLookupURL
+		location string
+	)
+	if e.IPLookupURLs != nil {
+		entries = e.IPLookupURLs
+		location = "the ipLookupURLs of the endpoint"
+	} else {
+		for _, u := range c.IPLookupURLs {
+			if u.Family == e.IPLookupFamily {
+				entries = append(entries, u)
+			}
+		}
+		location = "ipLookupURLs"
+	}
+
+	res := make([]iplookup.Source, len(entries))
+	for i, u := range entries {
+		res[i] = iplookup.Source{
+			URL:    u.URL,
+			Family: e.IPLookupFamily,
+		}
+		if u.Pattern != "" {
+			re, err := regexp.Compile(u.Pattern)
+			if err != nil {
+				return nil, fmt.Errorf("entry %d in %s has an invalid pattern: %w", i, location, err)
+			}
+			res[i].Pattern = re
+		}
+	}
+	return res, nil
 }
 
 type ConfigProvider struct {
@@ -331,6 +408,11 @@ func (c *Config) Validate(logger *slog.Logger) error {
 		return errors.New("no domains configured; specify at least one domain under 'domains'")
 	}
 
+	err := c.validateIPLookupURLs()
+	if err != nil {
+		return err
+	}
+
 	// Validate domains
 	for di := range c.Domains {
 		// Use a pointer so that defaults and sanitization are persisted
@@ -363,7 +445,7 @@ func (c *Config) Validate(logger *slog.Logger) error {
 		default:
 			return fmt.Errorf("domain %s is invalid: healthChecks.method must be GET or HEAD", d.RecordName)
 		}
-		err := validateExpectStatus(d.HealthChecks.ExpectStatus)
+		err = validateExpectStatus(d.HealthChecks.ExpectStatus)
 		if err != nil {
 			return fmt.Errorf("domain %s is invalid: healthChecks.%w", d.RecordName, err)
 		}
@@ -373,18 +455,19 @@ func (c *Config) Validate(logger *slog.Logger) error {
 
 		// Validate endpoints for this domain
 		for ei, v := range d.Endpoints {
-			if v.URL == "" {
+			err = v.validateTarget(d.RecordName, c.ipLookupFamilies())
+			if err != nil {
+				return fmt.Errorf("domain %s endpoint %d is invalid: %w", d.RecordName, ei, err)
+			}
+			// Endpoints that look up their address can skip the health check
+			if v.URL == "" && !v.Dynamic() {
 				return fmt.Errorf("domain %s endpoint %d is invalid: URL is empty", d.RecordName, ei)
 			}
 			if v.Priority < 0 {
 				return fmt.Errorf("domain %s endpoint %d is invalid: priority must not be negative", d.RecordName, ei)
 			}
-			err = v.validateTarget(d.RecordName)
-			if err != nil {
-				return fmt.Errorf("domain %s endpoint %d is invalid: %w", d.RecordName, ei, err)
-			}
 			if v.Name == "" {
-				v.Name = v.URL
+				v.Name = v.defaultName()
 			}
 		}
 
@@ -398,21 +481,33 @@ func (c *Config) Validate(logger *slog.Logger) error {
 }
 
 // Options that set what an endpoint publishes, of which exactly one is required
-var endpointTargetOptions = []string{"ip", "cname"}
+var endpointTargetOptions = []string{"ip", "cname", "ipLookupFamily"}
+
+// joinOptions lists option names for a message, like "ip, cname or ipLookupFamily"
+func joinOptions(options []string) string {
+	last := len(options) - 1
+	return strings.Join(options[:last], ", ") + " or " + options[last]
+}
 
 // validateTarget checks what the endpoint publishes, and sanitizes it
-func (e *ConfigEndpoint) validateTarget(recordName string) error {
+func (e *ConfigEndpoint) validateTarget(recordName string, families map[int]bool) error {
 	var count int
-	for _, set := range []bool{e.IP != "", e.CNAME != ""} {
+	for _, set := range []bool{e.IP != "", e.CNAME != "", e.Dynamic()} {
 		if set {
 			count++
 		}
 	}
 	if count != 1 {
-		return fmt.Errorf("exactly one of %s must be set", strings.Join(endpointTargetOptions, " or "))
+		return fmt.Errorf("exactly one of %s must be set", joinOptions(endpointTargetOptions))
+	}
+
+	if !e.Dynamic() && e.IPLookupURLs != nil {
+		return errors.New("ipLookupURLs is set, but the endpoint has no ipLookupFamily: the services are only used to look up an address, not with a fixed ip or a cname")
 	}
 
 	switch {
+	case e.Dynamic():
+		return e.validateLookupServices(families)
 	case e.IP != "":
 		ip, err := netip.ParseAddr(e.IP)
 		if err != nil {
@@ -445,11 +540,14 @@ func validateDomainEndpoints(d *ConfigDomain) error {
 	targets := make(map[string]int, len(d.Endpoints))
 
 	for ei, e := range d.Endpoints {
-		prev, dup := targets[e.Target()]
-		if dup {
-			return fmt.Errorf("domain %s endpoint %d is invalid: %s is already used by endpoint %d", d.RecordName, ei, e.Target(), prev)
+		// The address of a dynamic endpoint isn't known until it is looked up
+		if !e.Dynamic() {
+			prev, dup := targets[e.Target()]
+			if dup {
+				return fmt.Errorf("domain %s endpoint %d is invalid: %s is already used by endpoint %d", d.RecordName, ei, e.Target(), prev)
+			}
+			targets[e.Target()] = ei
 		}
-		targets[e.Target()] = ei
 
 		g := groups[e.Priority]
 		if g == nil {
@@ -470,6 +568,97 @@ func validateDomainEndpoints(d *ConfigDomain) error {
 		if g.cname && g.count > 1 {
 			return fmt.Errorf("domain %s is invalid: priority %d has an endpoint with cname and other endpoints, but a CNAME record can't coexist with other records; give the endpoint with cname its own priority", d.RecordName, priority)
 		}
+	}
+
+	return nil
+}
+
+// validateLookupServices checks that an endpoint with `ipLookupFamily` has at least one service to ask
+func (e *ConfigEndpoint) validateLookupServices(families map[int]bool) error {
+	if e.IPLookupFamily != 4 && e.IPLookupFamily != 6 {
+		return fmt.Errorf("ipLookupFamily must be 4 or 6, got %d", e.IPLookupFamily)
+	}
+
+	if e.IPLookupURLs == nil {
+		if !families[e.IPLookupFamily] {
+			return fmt.Errorf("ipLookupFamily is %[1]d, but no service is configured for it: set ipLookupURLs on the endpoint, or add an entry with family %[1]d to the top-level ipLookupURLs", e.IPLookupFamily)
+		}
+		return nil
+	}
+
+	if len(e.IPLookupURLs) == 0 {
+		return errors.New("ipLookupURLs is empty: add at least one service, or remove the key to use the top-level ipLookupURLs")
+	}
+	return validateIPLookupURLList(e.IPLookupURLs, e.IPLookupFamily)
+}
+
+// defaultName returns the name of an endpoint that doesn't set one
+func (e *ConfigEndpoint) defaultName() string {
+	if e.URL != "" {
+		return e.URL
+	}
+	return fmt.Sprintf("IPv%d lookup", e.IPLookupFamily)
+}
+
+// ipLookupFamilies returns the IP versions that have at least one service in the top-level list
+func (c *Config) ipLookupFamilies() map[int]bool {
+	res := make(map[int]bool, 2)
+	for _, u := range c.IPLookupURLs {
+		res[u.Family] = true
+	}
+	return res
+}
+
+// validateIPLookupURLs validates the top-level list of services used for IP lookups
+func (c *Config) validateIPLookupURLs() error {
+	return validateIPLookupURLList(c.IPLookupURLs, 0)
+}
+
+// validateIPLookupURLList validates a list of services
+// The family is the `ipLookupFamily` of the endpoint the list belongs to, or 0 for the top-level list, where each entry must set its own
+func validateIPLookupURLList(list []ConfigIPLookupURL, family int) error {
+	type key struct {
+		url    string
+		family int
+	}
+	seen := make(map[key]struct{}, len(list))
+
+	for i, u := range list {
+		// The URL can contain a token, so it's never part of an error message
+		if u.URL == "" {
+			return fmt.Errorf("ipLookupURLs[%d] is invalid: url is empty", i)
+		}
+		err := iplookup.ValidateURL(u.URL)
+		if err != nil {
+			return fmt.Errorf("ipLookupURLs[%d] is invalid: url %w", i, err)
+		}
+
+		entryFamily := u.Family
+		switch {
+		case family == 0 && u.Family != 4 && u.Family != 6:
+			return fmt.Errorf("ipLookupURLs[%d] (%s) is invalid: family must be 4 or 6, got %d", i, iplookup.RedactURL(u.URL), u.Family)
+		case family != 0 && u.Family == 0:
+			entryFamily = family
+		case family != 0 && u.Family != family:
+			return fmt.Errorf("ipLookupURLs[%d] (%s) is invalid: family is %d, but the endpoint has ipLookupFamily %d; an endpoint looks up one IP version, so IPv4 and IPv6 services can't be mixed in its list", i, iplookup.RedactURL(u.URL), u.Family, family)
+		}
+
+		if u.Pattern != "" {
+			re, err := regexp.Compile(u.Pattern)
+			if err != nil {
+				return fmt.Errorf("ipLookupURLs[%d] (%s) is invalid: pattern is not a valid regular expression: %w", i, iplookup.RedactURL(u.URL), err)
+			}
+			if re.NumSubexp() != 1 {
+				return fmt.Errorf("ipLookupURLs[%d] (%s) is invalid: pattern must have exactly one capture group", i, iplookup.RedactURL(u.URL))
+			}
+		}
+
+		k := key{url: u.URL, family: entryFamily}
+		_, dup := seen[k]
+		if dup {
+			return fmt.Errorf("ipLookupURLs[%d] (%s) is invalid: the same url and family are already in the list", i, iplookup.RedactURL(u.URL))
+		}
+		seen[k] = struct{}{}
 	}
 
 	return nil

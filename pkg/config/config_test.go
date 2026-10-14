@@ -244,7 +244,7 @@ func TestValidate(t *testing.T) {
 		{
 			name:      "empty IP",
 			mutate:    func(c *Config) { c.Domains[0].Endpoints[0].IP = "" },
-			expectErr: "domain test.example.com endpoint 0 is invalid: exactly one of ip or cname must be set",
+			expectErr: "domain test.example.com endpoint 0 is invalid: exactly one of ip, cname or ipLookupFamily must be set",
 		},
 	}
 

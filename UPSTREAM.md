@@ -3,7 +3,7 @@
 This file is specific to this fork: it tracks what has been, and still has to be, submitted to
 [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup). It must not be part of any upstream PR.
 
-Last reviewed: 2026-10-14 (dates are UTC). This copy describes the branch `integration/fork`; see "State of the branch". Upstream `main` is `23ac0bb` (AWS Route53 and Google Cloud DNS), and this fork's `main` records it as merged.
+Last reviewed: 2026-10-16 (dates are UTC). This fork's `main` is upstream `main` (`1ade733`, which has #35, #36 and #41) with the open upstream pull requests #37 to #39 merged, an earlier head of #40, and the fork-only features below on top; see "State of the branch".
 go-kit (the maintainer's library, [italypaleale/go-kit](https://github.com/italypaleale/go-kit)) is at v1.5.0; this fork's `go.mod` still uses 1.4.1 until [#40](https://github.com/ItalyPaleAle/ddup/pull/40) merges.
 
 ## Syncing with upstream
@@ -31,7 +31,7 @@ Always branch PRs from `upstream/main` and apply only the listed changes; never 
   - `AGENTS.md` still says to run `make gen-config`, but the maintainer removed that target (there is no `tools/gen-config`): there is nothing to run.
 - Style the maintainer enforces in reviews: explicit over inferred (the config says what a record is, the code does not guess); hand-rolled over a new dependency (the history popover in [#37](https://github.com/ItalyPaleAle/ddup/pull/37) has no UI library); no AI-flavored over-defensiveness (no defensive checks or fallbacks for cases that can't happen); no provider-specific keys in the generic part of the config; keep new config options minimal.
 - Show how a UI change looks (screenshots) and offer design options for visual choices.
-- Upstream will have a `DEVELOPMENT.md` once [#36](https://github.com/ItalyPaleAle/ddup/pull/36) merges; until then use the plain commands in the checklist at the end.
+- Upstream has a `DEVELOPMENT.md` and Makefile targets ([#36](https://github.com/ItalyPaleAle/ddup/pull/36), merged): use them for the checks. The plain commands in the checklist at the end do the same.
 - golangci-lint is pinned in `.golangci-lint-version` (with the leading `v`); install that release binary, because package manager builds refuse this module's Go version.
 - The maintainer plans a release once the open PRs he agreed to are in.
 
@@ -49,12 +49,12 @@ Always branch PRs from `upstream/main` and apply only the listed changes; never 
 | [#18](https://github.com/ItalyPaleAle/ddup/pull/18) | Overall status in the tab icon (shapes, pre-rendered PNGs) | **Merged** 2026-10-13 (`7eafb33`), then the maintainer's e2e tests | `pr/13-tab-icon-status` | `dashboard/scripts/build-favicons.ts` and the icons are upstream's |
 | [#34](https://github.com/ItalyPaleAle/ddup/pull/34) | Failover priorities (issue #23) | **Merged** 2026-10-13 (`d9557f9`), approved without changes | `feat/priorities` | `pkg/healthcheck/priorities.go` is upstream's; `tiers.go` (`selectPublication`) calls `selectLowestPriority` |
 | go-kit [#10](https://github.com/italypaleale/go-kit/pull/10), [#11](https://github.com/italypaleale/go-kit/pull/11), [#12](https://github.com/italypaleale/go-kit/pull/12) | Resend emailer; webhook timeout, retry, private destination and redirect options; ntfy format | **Merged** 2026-10-13 and 2026-10-14, released in go-kit v1.5.0 | | Used by [#40](https://github.com/ItalyPaleAle/ddup/pull/40) |
-| [#35](https://github.com/ItalyPaleAle/ddup/pull/35) | Version footer (issue #28): build info written into `index.html` by the server, reload on upgrade | **Open**, changes requested (2026-10-13); the follow-up commits answer the review (server-side injection, e2e tests), no new review yet | `feat/version-footer` | `GET /api/info` and a footer fetched at runtime, the first version of this PR |
-| [#36](https://github.com/ItalyPaleAle/ddup/pull/36) | `DEVELOPMENT.md` and Makefile targets (issue #32) | **Open**, no review yet | `docs/development` | None |
-| [#37](https://github.com/ItalyPaleAle/ddup/pull/37) | Endpoint history popover: since when healthy or failing (issue #31) | **Open**, no review yet | `feat/endpoint-history` | The "since" tooltip |
-| [#38](https://github.com/ItalyPaleAle/ddup/pull/38) | `cname` endpoints and `providerOptions.cloudflare.proxied` (issue #24) | **Open**, no review yet; verified against the real Cloudflare API | `feat/cname-proxied` | `cname` and `proxied` on the endpoint, typed targets |
-| [#39](https://github.com/ItalyPaleAle/ddup/pull/39) | Public IP lookup over HTTPS, `ipLookupFamily`, `ipLookupURLs`, no built-in services (issue #25); verified against the real Cloudflare API | **Open**, no review yet | `feat/ip-lookup-https` | Per-endpoint `ipLookup: {urls, family, pattern}` |
-| [#40](https://github.com/ItalyPaleAle/ddup/pull/40) | Notifications for ntfy, webhooks and email, on go-kit v1.5.0 (issue #26) | **Open**, no review yet | `feat/notifications` | Templated `webhooks` with `vars` |
+| [#35](https://github.com/ItalyPaleAle/ddup/pull/35) | Version footer (issue #28): build info written into `index.html` by the server, reload on upgrade | **Merged** 2026-10-15 (`1472e67`) after the maintainer's own changes | `feat/version-footer` | `pkg/server/buildinfo.go` and `static.go` are upstream's |
+| [#36](https://github.com/ItalyPaleAle/ddup/pull/36) | `DEVELOPMENT.md` and Makefile targets (issue #32) | **Merged** 2026-10-15 (`b4ec5fe`) | `docs/development` | Same |
+| [#37](https://github.com/ItalyPaleAle/ddup/pull/37) | Endpoint history popover: since when healthy or failing, and the failed checks of an endpoint in the warning state (issue #31) | **Open**, changes requested; the follow-up commits answer the review (seconds, `RWMutex`, the failures in the warning state). The branch was force-pushed, so it is merged here through a bridge commit that records the old head | `feat/endpoint-history` | The "since" tooltip, now the popover |
+| [#38](https://github.com/ItalyPaleAle/ddup/pull/38) | `cname` endpoints and `providerOptions.cloudflare.proxied` (issue #24) | **Open**, review required; verified against the real Cloudflare API | `feat/cname-proxied` | `cname` and `proxied` on the endpoint, typed targets |
+| [#39](https://github.com/ItalyPaleAle/ddup/pull/39) | Public IP lookup over HTTPS, `ipLookupFamily`, `ipLookupURLs`, no built-in services (issue #25); verified against the real Cloudflare API | **Open**, changes requested; simplified after review (no `pattern`, an endpoint with `ipLookupURLs` and no family looks up IPv4, the lookup options are a struct) | `feat/ip-lookup-https` | Per-endpoint `ipLookup: {urls, family, pattern}` |
+| [#40](https://github.com/ItalyPaleAle/ddup/pull/40) | Notifications for ntfy, webhooks and email, on go-kit v1.5.0 (issue #26) | **Open**, changes requested. Its review rework (ntfy as a webhook `format`, no redaction of provider secrets, one email sender per recipient) is **not** in this fork yet: it changes the configuration (`notifications.ntfy` becomes a `webhooks` entry with `format: ntfy`) and the deployed configuration would have to change with it | `feat/notifications` | Templated `webhooks` with `vars` |
 | [#20](https://github.com/ItalyPaleAle/ddup/pull/20) | Light/dark/system theme switcher | **Closed** 2026-10-04 by the maintainer: causes theme flicker, respecting the browser preference is right | `pr/15-theme-switcher` | Kept in the fork, on purpose |
 | [#8](https://github.com/ItalyPaleAle/ddup/pull/8) | `!env` / `!file` secret references | **Closed** 2026-10-03; replaced by upstream's own `!file` and `!envfile` (issue #22, go-kit 1.4.0) | `pr/3-secret-refs` | Dropped; the fork uses upstream's tags |
 | #5, #7, #10 to #14 | The first stacked PRs | **Closed** by us to keep reviews small | `chain/*` | Replaced by the PRs above |
@@ -137,8 +137,8 @@ The local `main` in the main checkout is 48 commits behind `origin/main`; update
 ## Releases
 
 The image is `ghcr.io/mrwulf/ddup`, built by `.github/workflows/build-and-publish.yaml` when a `v*` tag is pushed (and for `main` as `edge`).
-The tags are `v0.6.0-fork.N`. The latest is `v0.6.0-fork.22` (2026-10-12), and it is what is deployed.
-`main` is 28 commits ahead of it, with no tag yet: the upstream sync of 2026-10-12 and 2026-10-13 (segmented bar, tab icon shapes, upstream's priority selection, go-kit helpers, e2e tests), and the two providers from the sync after that.
+The tags are `v0.6.0-fork.N`. The latest is `v0.6.0-fork.24` (2026-10-14), and it is what is deployed.
+`main` is ahead of it by the refresh of 2026-10-16: the final heads of #35, #36 and #37 (the failed checks in the history popover), #39 (simplified after review) and `1ade733` of upstream. #40 stays at its earlier head.
 
 | Tag | Added |
 | :-- | :---- |
@@ -146,13 +146,15 @@ The tags are `v0.6.0-fork.N`. The latest is `v0.6.0-fork.22` (2026-10-12), and i
 | `fork.18` to `fork.20` | Leader election, its defaults, request forwarding |
 | `fork.21` | Webhook `vars` |
 | `fork.22` | Refreshed screenshots (docs only) |
+| `fork.23` | The integration of the open upstream PRs (#14, #17); the image build was cancelled for running too long |
+| `fork.24` | Container image built for the Linux platforms only |
 
 ## Before opening a PR
 
 1. Open an issue first if it is a new feature, and wait for agreement.
 2. `git fetch upstream`, then branch from `upstream/main`.
 3. Cherry-pick only the commits for one feature, and remove anything fork-only (see above).
-4. Run the checks (until `DEVELOPMENT.md` and the Makefile targets of #36 are merged, use the plain commands):
+4. Run the checks (`DEVELOPMENT.md` and the Makefile targets say how; these are the plain commands):
    - `mkdir -p dashboard/dist && touch dashboard/dist/.placeholder` (the Go code embeds `dashboard/dist`; it is gitignored)
    - `go vet -tags unit ./...` and `go vet -tags unit,dashboarddev ./cmd/...`
    - `gofmt -l pkg cmd` lists nothing

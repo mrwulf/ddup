@@ -230,7 +230,8 @@ test.describe('domain list', () => {
 
     test('shows the details of each domain', async ({ page }) => {
         const card = domainCard(page, 'partial.example')
-        await expect(card).toContainText('Provider: ovh')
+        // The provider is configuration, not status, so the card does not show it
+        await expect(card).not.toContainText('Provider')
         await expect(card).toContainText('1/2 endpoints healthy')
         await expect(card).toContainText('Endpoints (2)')
 
@@ -880,7 +881,6 @@ test.describe('endpoint history', () => {
         await expect(line.getByRole('button', { name: 'History of history.example' })).toBeVisible()
 
         // The time of the last update is only in the history dialog
-        await expect(card.getByText('Provider: cloudflare')).toBeVisible()
         await expect(card.locator('time')).toHaveCount(0)
     })
 

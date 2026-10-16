@@ -45,16 +45,15 @@ The notifications of upstream PR [#40](https://github.com/ItalyPaleAle/ddup/pull
 
 - Endpoint names instead of addresses in the titles of `dns_updated` (`example.com now points to server1, server2`) and `dns_update_failed` (`DNS update failed for example.com (wanted server1)`). An endpoint whose name is only the default (its health-check URL, which can contain a token) is shown by its address in titles and in the body; a name that looks like a URL or has credentials is never used.
 - A green, yellow or red circle for the status of the domain in the title and in the `Status` line (ntfy keeps it in the tag only, so it isn't shown twice).
-- The error of the latest check of each unhealthy endpoint, without the endpoint's URL and with the configured secrets removed.
+- The error of the latest check of each unhealthy endpoint, without the endpoint's URL.
 - On domains with more than one priority, the priority of each endpoint, `healthy (standby)` for a healthy endpoint that is not published, and `Priority: <new> (was <old>)` when a `dns_updated` changes tier.
 
 The README shows an example under [Detailed messages](README.md#detailed-messages).
 Nothing changes in when notifications are sent: only the leader sends them, through the same queues.
 
-**How it is kept apart.** The code is in `pkg/notify/detail.go` and `pkg/healthcheck/notifydetail.go`, with their tests. The secrets of the DNS providers and of the notifications are removed from the errors in events by `pkg/notify/redactfork.go`: upstream dropped that redaction in the review of #40, and the fork keeps it because the detailed messages show the error of each unhealthy endpoint.
-Upstream files have one-line hooks only: the `Detail` field of `notify.Event`, the `redact` field of `Notifier` set in `newNotifier`, the `ntfyTitle` of `message`, `Notifier.message` and `Notifier.redactDetail` in `notifier.go`, the `notifyDetail` field of `domainChecker` set in `healthchecker.go` and read in `HealthChecker.notify`, and the `Detail` setting of `ConfigNotifications` with its default in `GetDefaultConfig`. A configuration built in code (as in upstream's tests) has `Detail: false`, so upstream's message tests run unchanged.
+**How it is kept apart.** The code is in `pkg/notify/detail.go` and `pkg/healthcheck/notifydetail.go`, with their tests. Upstream files have one-line hooks only: the `Detail` field of `notify.Event`, the `ntfyTitle` of `message`, `Notifier.message` and `Notifier.redactDetail` in `notifier.go`, the `notifyDetail` field of `domainChecker` set in `healthchecker.go` and read in `HealthChecker.notify`, and the `Detail` setting of `ConfigNotifications` with its default in `GetDefaultConfig`. A configuration built in code (as in upstream's tests) has `Detail: false`, so upstream's message tests run unchanged.
 
-**How to drop it.** Delete those three files and their tests, then remove the hooks listed above.
+**How to drop it.** Delete those two files and their tests, then remove the hooks listed above.
 Configurations that set `detail` would then fail to load, because unknown keys are rejected.
 
 **Upstreaming.** A candidate once [#40](https://github.com/ItalyPaleAle/ddup/pull/40) is merged: the names in titles, the errors and the tiers are the most useful part, and upstream may prefer them without a setting. The name logic is self-contained: `EndpointDetail.Label` is filled from `displayName` (the configured name, empty for the default) and `Detail.names` falls back to the address, so upstream could fold `Label` into `EndpointState` directly.

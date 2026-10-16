@@ -29,9 +29,7 @@ const (
 // A nil Notifier is valid and does nothing
 type Notifier struct {
 	senders []*sender
-	// Fork extension: removes secrets from the errors of events, see redactfork.go
-	redact *redactor
-	log    *slog.Logger
+	log     *slog.Logger
 	// Fork extension: send the detailed messages, see detail.go
 	detail bool
 
@@ -109,7 +107,6 @@ func newNotifier(ctx context.Context, cfg *config.Config, deps dependencies) (*N
 		}
 		n.senders = append(n.senders, senders...)
 	}
-	n.redact = newForkRedactor(cfg)
 
 	// Start the workers
 	// Deliveries use their own context, so events queued when the application is stopping are still delivered
@@ -225,8 +222,7 @@ func (n *Notifier) Notify(ev Event) {
 	if ev.Time.IsZero() {
 		ev.Time = time.Now()
 	}
-	ev.Error = n.redact.String(ev.Error)
-	ev.Detail = n.redactDetail(ev.Detail)
+	ev.Detail = tidyDetail(ev.Detail)
 
 	n.lock.RLock()
 	defer n.lock.RUnlock()

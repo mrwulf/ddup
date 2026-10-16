@@ -13,7 +13,7 @@ Everything shown below is sample data: `example.com` names, documentation IP add
 Each endpoint row shows what ddup publishes and why. Upstream shows the endpoints of a domain by address; the rows here are fork-only for now (upstream issue [#27](https://github.com/ItalyPaleAle/ddup/issues/27), after the features above). The status API carries what the rows need: `name`, `priority` and `active` (published in DNS), next to the upstream fields `type`, `proxied` and the times.
 
 - **Name and address.** The name of the endpoint is the main label, with its address below. An endpoint with no name shows its address. The rows are ordered by priority.
-- **Priority and standby.** The row shows the endpoint's priority, and whether it is published in DNS or healthy on standby (see `fast-lb` and `ingress-lb`). The selection of the lowest priority is upstream's; the display and the published set in the status API are not.
+- **Priority and standby.** In a domain with more than one priority, the row shows the endpoint's priority, and whether it is published in DNS or healthy on standby (see `fast-lb` and `ingress-lb`). A healthy endpoint that is published in DNS shows the published chip also in a domain with one priority, so the rows look the same in every domain. The selection of the lowest priority is upstream's; the display and the published set in the status API are not.
 - **Failed checks and domain errors.** A warning triangle with the number of consecutive failed checks. A domain that can't be updated shows the provider error (`status`).
 - **Legend.** The footer explains every icon, above the version of the build.
 

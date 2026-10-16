@@ -307,6 +307,40 @@ const tieredDomains: DomainsResponse = {
     },
 }
 
+// A domain with one priority has no tiers: the priority is not shown, but what is published still is
+const singlePriorityDomains: DomainsResponse = {
+    'single.example': {
+        lastUpdated,
+        provider: 'cloudflare',
+        endpoints: [
+            { name: 'home', healthy: true, ip: '203.0.113.7', type: 'A', active: true },
+            { name: 'spare', healthy: true, ip: '203.0.113.8', type: 'A', active: true },
+            { name: 'down', healthy: false, ip: '203.0.113.9', type: 'A', failureCount: 3 },
+        ],
+    },
+}
+
+test.describe('endpoints of a domain with one priority', () => {
+    test.beforeEach(async ({ page }) => {
+        await mockStatus(page, singlePriorityDomains)
+        await page.goto('/')
+        await expect(cardTitles(page)).toHaveText(['single.example'])
+    })
+
+    test('shows what is published, but no priority', async ({ page }) => {
+        const card = domainCard(page, 'single.example')
+        await expect(endpointRow(card, '203.0.113.7').getByTitle('Published in DNS')).toBeVisible()
+        await expect(endpointRow(card, '203.0.113.8').getByTitle('Published in DNS')).toBeVisible()
+
+        // Only a healthy endpoint can be published
+        await expect(endpointRow(card, '203.0.113.9').getByTitle('Published in DNS')).toHaveCount(0)
+        await expect(endpointRow(card, '203.0.113.9').getByTitle('Healthy, on standby')).toHaveCount(0)
+
+        // With a single priority it says nothing, so it is not shown
+        await expect(card.locator('[title^="Priority"]')).toHaveCount(0)
+    })
+})
+
 test.describe('endpoints', () => {
     test.beforeEach(async ({ page }) => {
         await mockStatus(page, tieredDomains)

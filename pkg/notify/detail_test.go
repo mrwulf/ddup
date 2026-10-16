@@ -112,9 +112,10 @@ func TestDetailNtfy(t *testing.T) {
 	ts := newTestServer(t, nil)
 
 	n := detailNotifier(t, config.ConfigNotifications{
-		Ntfy: []config.ConfigNotificationNtfy{
+		Webhooks: []config.ConfigNotificationWebhook{
 			{
 				Name:                       "alerts",
+				Format:                     config.WebhookFormatNtfy,
 				URL:                        ts.URL + "/ddup",
 				ConfigNotificationDelivery: fastDelivery(),
 			},
@@ -190,9 +191,10 @@ func TestDetailErrorsAreRedacted(t *testing.T) {
 	ts := newTestServer(t, nil)
 
 	n := detailNotifier(t, config.ConfigNotifications{
-		Ntfy: []config.ConfigNotificationNtfy{
+		Webhooks: []config.ConfigNotificationWebhook{
 			{
 				Name:                       "alerts",
+				Format:                     config.WebhookFormatNtfy,
 				URL:                        ts.URL + "/ddup",
 				ConfigNotificationDelivery: fastDelivery(),
 			},
@@ -300,14 +302,13 @@ func TestDetailURLNameNeverSent(t *testing.T) {
 	ts := newTestServer(t, nil)
 	fake := &fakeEmailer{}
 	n := detailNotifier(t, config.ConfigNotifications{
-		Ntfy: []config.ConfigNotificationNtfy{
+		Webhooks: []config.ConfigNotificationWebhook{
 			{
 				Name:                       "alerts",
+				Format:                     config.WebhookFormatNtfy,
 				URL:                        ts.URL + "/ddup",
 				ConfigNotificationDelivery: fastDelivery(),
 			},
-		},
-		Webhooks: []config.ConfigNotificationWebhook{
 			{
 				Name:                       "chat",
 				Format:                     "plain",

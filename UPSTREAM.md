@@ -3,7 +3,7 @@
 This file is specific to this fork: it tracks what has been, and still has to be, submitted to
 [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup). It must not be part of any upstream PR.
 
-Last reviewed: 2026-10-16 (dates are UTC). This fork's `main` is upstream `main` (`1ade733`, which has #35, #36 and #41) with the open upstream pull requests #37 to #39 merged, an earlier head of #40, and the fork-only features below on top; see "State of the branch".
+Last reviewed: 2026-10-16 (dates are UTC). This fork's `main` is upstream `main` (`1ade733`, which has #35, #36 and #41) with the open upstream pull requests #37 to #40 merged, and the fork-only features below on top; see "State of the branch".
 go-kit (the maintainer's library, [italypaleale/go-kit](https://github.com/italypaleale/go-kit)) is at v1.5.0; this fork's `go.mod` still uses 1.4.1 until [#40](https://github.com/ItalyPaleAle/ddup/pull/40) merges.
 
 ## Syncing with upstream
@@ -54,7 +54,7 @@ Always branch PRs from `upstream/main` and apply only the listed changes; never 
 | [#37](https://github.com/ItalyPaleAle/ddup/pull/37) | Endpoint history popover: since when healthy or failing, and the failed checks of an endpoint in the warning state (issue #31) | **Open**, changes requested; the follow-up commits answer the review (seconds, `RWMutex`, the failures in the warning state). The branch was force-pushed, so it is merged here through a bridge commit that records the old head | `feat/endpoint-history` | The "since" tooltip, now the popover |
 | [#38](https://github.com/ItalyPaleAle/ddup/pull/38) | `cname` endpoints and `providerOptions.cloudflare.proxied` (issue #24) | **Open**, review required; verified against the real Cloudflare API | `feat/cname-proxied` | `cname` and `proxied` on the endpoint, typed targets |
 | [#39](https://github.com/ItalyPaleAle/ddup/pull/39) | Public IP lookup over HTTPS, `ipLookupFamily`, `ipLookupURLs`, no built-in services (issue #25); verified against the real Cloudflare API | **Open**, changes requested; simplified after review (no `pattern`, an endpoint with `ipLookupURLs` and no family looks up IPv4, the lookup options are a struct) | `feat/ip-lookup-https` | Per-endpoint `ipLookup: {urls, family, pattern}` |
-| [#40](https://github.com/ItalyPaleAle/ddup/pull/40) | Notifications for ntfy, webhooks and email, on go-kit v1.5.0 (issue #26) | **Open**, changes requested. Its review rework (ntfy as a webhook `format`, no redaction of provider secrets, one email sender per recipient) is **not** in this fork yet: it changes the configuration (`notifications.ntfy` becomes a `webhooks` entry with `format: ntfy`) and the deployed configuration would have to change with it | `feat/notifications` | Templated `webhooks` with `vars` |
+| [#40](https://github.com/ItalyPaleAle/ddup/pull/40) | Notifications for ntfy, webhooks and email, on go-kit v1.5.0 (issue #26) | **Open**, changes requested; reworked after review (ntfy is a webhook `format`, no redaction of provider secrets, one email sender per recipient). The fork has the reworked head: `notifications.ntfy` is now a `webhooks` entry with `format: ntfy`, and the redaction stays as the fork extension `pkg/notify/redactfork.go` | `feat/notifications` | Templated `webhooks` with `vars` |
 | [#20](https://github.com/ItalyPaleAle/ddup/pull/20) | Light/dark/system theme switcher | **Closed** 2026-10-04 by the maintainer: causes theme flicker, respecting the browser preference is right | `pr/15-theme-switcher` | Kept in the fork, on purpose |
 | [#8](https://github.com/ItalyPaleAle/ddup/pull/8) | `!env` / `!file` secret references | **Closed** 2026-10-03; replaced by upstream's own `!file` and `!envfile` (issue #22, go-kit 1.4.0) | `pr/3-secret-refs` | Dropped; the fork uses upstream's tags |
 | #5, #7, #10 to #14 | The first stacked PRs | **Closed** by us to keep reviews small | `chain/*` | Replaced by the PRs above |
@@ -138,7 +138,7 @@ The local `main` in the main checkout is 48 commits behind `origin/main`; update
 
 The image is `ghcr.io/mrwulf/ddup`, built by `.github/workflows/build-and-publish.yaml` when a `v*` tag is pushed (and for `main` as `edge`).
 The tags are `v0.6.0-fork.N`. The latest is `v0.6.0-fork.24` (2026-10-14), and it is what is deployed.
-`main` is ahead of it by the refresh of 2026-10-16: the final heads of #35, #36 and #37 (the failed checks in the history popover), #39 (simplified after review) and `1ade733` of upstream. #40 stays at its earlier head.
+`main` is ahead of it by the refresh of 2026-10-16: the final heads of #35, #36 and #37 (the failed checks in the history popover), #39 and #40 (both reworked after review) and `1ade733` of upstream. The notifications configuration changes with it: `notifications.ntfy` becomes a `webhooks` entry with `format: ntfy`, so the deployed configuration and the image tag must change together.
 
 | Tag | Added |
 | :-- | :---- |

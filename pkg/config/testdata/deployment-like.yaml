@@ -77,8 +77,9 @@ providers:
       zoneId: !file /etc/ddup/secrets/DDNS_CLOUDFLARE_ZONE_ID
 
 notifications:
-  ntfy:
+  webhooks:
     - name: "ntfy"
+      format: "ntfy"
       url: "http://ntfy.system.svc.cluster.local:80/ddup"
       token: !file /etc/ddup/secrets/NTFY_TOKEN
       allowPrivateDestinations: true

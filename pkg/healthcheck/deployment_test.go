@@ -167,8 +167,9 @@ func TestDeploymentLikeConfig_Structure(t *testing.T) {
 	assert.Equal(t, 15*time.Second, cfg.LeaderElection.LeaseDuration)
 
 	// Notifications: ntfy at a private in-cluster URL, with the token from a file, and email with the recipient from a file
-	require.Len(t, cfg.Notifications.Ntfy, 1)
-	ntfy := cfg.Notifications.Ntfy[0]
+	require.Len(t, cfg.Notifications.Webhooks, 1)
+	ntfy := cfg.Notifications.Webhooks[0]
+	assert.Equal(t, config.WebhookFormatNtfy, ntfy.Format)
 	assert.Equal(t, "http://ntfy.system.svc.cluster.local:80/ddup", ntfy.URL)
 	assert.Equal(t, ntfyToken, ntfy.Token)
 	assert.True(t, ntfy.AllowPrivateDestinations)
@@ -195,7 +196,7 @@ func TestDeploymentLikeConfig_Rejections(t *testing.T) {
 			cfg.Domains[0].Endpoints[2].Priority = 0
 		},
 		"an unknown notification event": func(cfg *config.Config) {
-			cfg.Notifications.Ntfy[0].Events = []config.NotificationEvent{"nope"}
+			cfg.Notifications.Webhooks[0].Events = []config.NotificationEvent{"nope"}
 		},
 		"a leader election with the durations in the wrong order": func(cfg *config.Config) {
 			cfg.LeaderElection.RenewDeadline = 20 * time.Second
@@ -602,7 +603,7 @@ func newDeployment(t *testing.T) *deployment {
 			}
 		}
 	}
-	cfg.Notifications.Ntfy[0].URL = d.ntfy.URL + "/ddup"
+	cfg.Notifications.Webhooks[0].URL = d.ntfy.URL + "/ddup"
 	cfg.Notifications.Email[0].ConnectionString = strings.Replace(cfg.Notifications.Email[0].ConnectionString, relayAddr, d.relay.Addr().String(), 1)
 
 	// The notifier is created from the configuration, as in main
@@ -909,9 +910,9 @@ func TestDeploymentLike_NtfyNeedsAllowPrivateDestinations(t *testing.T) {
 		t.Run(map[bool]string{true: "allowed", false: "not allowed"}[allow], func(t *testing.T) {
 			cfg := loadDeploymentConfig(t)
 			ntfy := newFakeNtfy(t)
-			cfg.Notifications.Ntfy[0].URL = ntfy.URL + "/ddup"
-			cfg.Notifications.Ntfy[0].AllowPrivateDestinations = allow
-			cfg.Notifications.Ntfy[0].MaxAttempts = 1
+			cfg.Notifications.Webhooks[0].URL = ntfy.URL + "/ddup"
+			cfg.Notifications.Webhooks[0].AllowPrivateDestinations = allow
+			cfg.Notifications.Webhooks[0].MaxAttempts = 1
 			cfg.Notifications.Email = nil
 
 			notifier, err := notify.New(t.Context(), cfg)

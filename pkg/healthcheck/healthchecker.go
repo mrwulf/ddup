@@ -23,7 +23,7 @@ import (
 type HealthChecker struct {
 	// Key is domain name
 	domainCheckers map[string]*domainChecker
-	// Optional; may be nil
+	// Optional, may be nil
 	notifier Notifier
 	// Decides whether this instance may update DNS and send notifications; checks always run
 	// Optional; nil means this instance always acts

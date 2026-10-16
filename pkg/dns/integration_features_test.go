@@ -287,7 +287,6 @@ func TestIntegrationSampleConfigHasEveryFeature(t *testing.T) {
 	assert.True(t, hasMethod, "healthChecks.method")
 	assert.True(t, hasExpectStatus, "healthChecks.expectStatus")
 	assert.NotEmpty(t, cfg.IPLookupURLs, "top-level ipLookupURLs")
-	assert.NotEmpty(t, cfg.Notifications.Ntfy, "ntfy notifications")
 	assert.NotEmpty(t, cfg.Notifications.Webhooks, "webhook notifications")
 	assert.NotEmpty(t, cfg.Notifications.Email, "email notifications")
 	assert.True(t, cfg.Server.Enabled, "server")

@@ -140,15 +140,15 @@ test.describe('mixed domain with the build info', () => {
         await expect(items).toHaveCount(3)
 
         await expect(items.nth(0)).toContainText('192.0.2.10')
-        await expect(items.nth(0)).toContainText('Unhealthy since Oct 13, 9:00 AM')
-        await expect(items.nth(0)).not.toContainText('Last failure')
+        await expect(items.nth(0)).toContainText('Unhealthy since Oct 13, 9:00:00 AM')
+        await expect(items.nth(0)).toContainText('Last failure: Oct 13, 9:29:00 AM')
 
         await expect(items.nth(1)).toContainText('203.0.113.5')
-        await expect(items.nth(1)).toContainText('Healthy since ddup started (Oct 13, 7:45 AM)')
+        await expect(items.nth(1)).toContainText('Healthy since ddup started (Oct 13, 7:45:00 AM)')
 
         await expect(items.nth(2)).toContainText('0a1b2c3d.cfargotunnel.com')
-        await expect(items.nth(2)).toContainText('Healthy since Oct 9, 8:15 AM')
-        await expect(items.nth(2)).toContainText('Last failure: Oct 9, 8:10 AM')
+        await expect(items.nth(2)).toContainText('Healthy since Oct 9, 8:15:00 AM')
+        await expect(items.nth(2)).toContainText('Last failure: Oct 9, 8:10:00 AM')
 
         // Opening the history doesn't reload the page
         expect(served.documents).toBe(1)

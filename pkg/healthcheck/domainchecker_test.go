@@ -1,8 +1,7 @@
 package healthcheck
 
 import (
-	"encoding/json"
-	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -19,6 +18,8 @@ type sinceFixture struct {
 	mock *checker.MockChecker
 	ep   *config.ConfigEndpoint
 	now  time.Time
+	// Number of checks run, to tell the errors apart
+	checks int
 }
 
 func newSinceFixture(maxAttempts int) *sinceFixture {
@@ -49,12 +50,13 @@ func (f *sinceFixture) check(t *testing.T, healthy bool) DomainStatusEndpoint {
 	t.Helper()
 
 	f.now = f.now.Add(time.Minute)
+	f.checks++
 	res := checker.Result{
 		Endpoint: f.ep,
 		Healthy:  healthy,
 	}
 	if !healthy {
-		res.Error = errors.New("connection failed")
+		res.Error = fmt.Errorf("connection failed (check %d)", f.checks)
 	}
 	f.mock.Results = []checker.Result{res}
 	f.hc.checkAndUpdateDNS(t.Context())
@@ -210,32 +212,70 @@ func TestEndpointSince_RemovedEndpointIsForgotten(t *testing.T) {
 	assert.Empty(t, dc.times)
 }
 
-func TestEndpointSince_APIFields(t *testing.T) {
-	marshal := func(e DomainStatusEndpoint) map[string]any {
-		raw, err := json.Marshal(e)
-		require.NoError(t, err)
-		m := map[string]any{}
-		require.NoError(t, json.Unmarshal(raw, &m))
-		return m
-	}
+func TestEndpointFailures_Warning(t *testing.T) {
+	// Three attempts, so two failed checks leave the endpoint healthy in the warning state
+	f := newSinceFixture(3)
 
-	f := newSinceFixture(1)
-	f.check(t, true)
-	m := marshal(f.check(t, false))
-	assert.Equal(t, f.now.Format(time.RFC3339Nano), m["since"])
-	assert.Equal(t, f.now.Format(time.RFC3339Nano), m["lastFailure"])
-	assert.NotContains(t, m, "sinceStart")
+	e := f.check(t, true)
+	assert.Nil(t, e.FirstFailure)
+	assert.Empty(t, e.LastError)
 
-	// A new endpoint reports that its start is not known, and has no last failure
-	g := newSinceFixture(1)
-	m = marshal(g.check(t, true))
-	assert.Contains(t, m, "since")
-	assert.Equal(t, true, m["sinceStart"])
-	assert.NotContains(t, m, "lastFailure")
+	// First failed check
+	e = f.check(t, false)
+	assert.True(t, e.Healthy)
+	assert.Equal(t, 1, e.FailureCount)
+	require.NotNil(t, e.FirstFailure)
+	assert.Equal(t, f.now, *e.FirstFailure)
+	assert.Equal(t, "connection failed (check 2)", e.LastError)
+	firstFailure := f.now
 
-	// Without times, all three fields are omitted
-	m = marshal(DomainStatusEndpoint{IP: "1.1.1.1"})
-	assert.NotContains(t, m, "since")
-	assert.NotContains(t, m, "sinceStart")
-	assert.NotContains(t, m, "lastFailure")
+	// Second failed check: the first one stays, the last one moves
+	e = f.check(t, false)
+	assert.True(t, e.Healthy)
+	assert.Equal(t, 2, e.FailureCount)
+	require.NotNil(t, e.FirstFailure)
+	assert.Equal(t, firstFailure, *e.FirstFailure)
+	require.NotNil(t, e.LastFailure)
+	assert.Equal(t, f.now, *e.LastFailure)
+	assert.Equal(t, "connection failed (check 3)", e.LastError)
+
+	// A passing check ends the run: the first failure goes, the last one is kept
+	lastFailure := f.now
+	e = f.check(t, true)
+	assert.Equal(t, 0, e.FailureCount)
+	assert.Nil(t, e.FirstFailure)
+	require.NotNil(t, e.LastFailure)
+	assert.Equal(t, lastFailure, *e.LastFailure)
+	assert.Equal(t, "connection failed (check 3)", e.LastError)
+
+	// A new run starts again with its own first failure
+	e = f.check(t, false)
+	require.NotNil(t, e.FirstFailure)
+	assert.Equal(t, f.now, *e.FirstFailure)
 }
+
+func TestDedupeResults(t *testing.T) {
+	a := &config.ConfigEndpoint{Name: "a", IPLookupFamily: 4}
+	b := &config.ConfigEndpoint{Name: "b", IPLookupFamily: 4}
+	static := &config.ConfigEndpoint{Name: "static", IP: "198.51.100.1"}
+	noAddr := &config.ConfigEndpoint{Name: "none", IPLookupFamily: 6}
+
+	in := []checker.Result{
+		{Endpoint: a, Target: "203.0.113.1", Healthy: false},
+		{Endpoint: b, Target: "203.0.113.1", Healthy: true},
+		{Endpoint: static, Healthy: true},
+		{Endpoint: noAddr},
+		{Endpoint: noAddr},
+	}
+	out := dedupeResults(in)
+	require.Len(t, out, 4)
+	assert.Equal(t, "b", out[0].Endpoint.Name, "a healthy result wins over an unhealthy one")
+	assert.Equal(t, "static", out[1].Endpoint.Name)
+	assert.Equal(t, "none", out[2].Endpoint.Name, "results without an address are kept")
+
+	assert.Equal(t, "203.0.113.1", resultIP(in[0]))
+	assert.Equal(t, "198.51.100.1", resultIP(in[2]))
+	assert.Empty(t, resultIP(in[3]))
+}
+
+// Uses the real checker and a real lookup against a test service: the address changes between cycles and DNS follows

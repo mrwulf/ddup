@@ -112,9 +112,10 @@ func TestDetailNtfy(t *testing.T) {
 	ts := newTestServer(t, nil)
 
 	n := detailNotifier(t, config.ConfigNotifications{
-		Ntfy: []config.ConfigNotificationNtfy{
+		Webhooks: []config.ConfigNotificationWebhook{
 			{
 				Name:                       "alerts",
+				Format:                     config.WebhookFormatNtfy,
 				URL:                        ts.URL + "/ddup",
 				ConfigNotificationDelivery: fastDelivery(),
 			},
@@ -186,13 +187,14 @@ func TestDetailEmail(t *testing.T) {
 	assert.Contains(t, sent[0].Message.Text, "UNHEALTHY (HTTP request failed: dial tcp 192.0.2.11:443: connect: connection refused)\n")
 }
 
-func TestDetailErrorsAreRedacted(t *testing.T) {
+func TestDetailErrorsAreOnOneLine(t *testing.T) {
 	ts := newTestServer(t, nil)
 
 	n := detailNotifier(t, config.ConfigNotifications{
-		Ntfy: []config.ConfigNotificationNtfy{
+		Webhooks: []config.ConfigNotificationWebhook{
 			{
 				Name:                       "alerts",
+				Format:                     config.WebhookFormatNtfy,
 				URL:                        ts.URL + "/ddup",
 				ConfigNotificationDelivery: fastDelivery(),
 			},
@@ -201,7 +203,7 @@ func TestDetailErrorsAreRedacted(t *testing.T) {
 
 	ev := detailEvent(config.EventAllUnhealthy)
 	shared := map[string]EndpointDetail{
-		"192.0.2.11": {Error: "IP lookup failed: https://lookup.example.com/ip?token=abc123: status code 500\nhttps://other.example.com/: " + testCFToken},
+		"192.0.2.11": {Error: "IP lookup failed: status code 500\nsecond lookup failed: timeout"},
 	}
 	ev.Detail.Endpoints = shared
 	n.Notify(ev)
@@ -209,12 +211,10 @@ func TestDetailErrorsAreRedacted(t *testing.T) {
 
 	reqs := ts.Requests()
 	require.Len(t, reqs, 1)
-	assert.NotContains(t, reqs[0].Body, testCFToken)
-	assert.NotContains(t, reqs[0].Body, "abc123")
-	assert.Contains(t, reqs[0].Body, "UNHEALTHY (IP lookup failed: https://lookup.example.com/ip?token=[redacted] status code 500; https://other.example.com/: [redacted])\n")
+	assert.Contains(t, reqs[0].Body, "UNHEALTHY (IP lookup failed: status code 500; second lookup failed: timeout)\n")
 
 	// The caller's detail is not changed
-	assert.Contains(t, shared["192.0.2.11"].Error, testCFToken)
+	assert.Contains(t, shared["192.0.2.11"].Error, "\n")
 }
 
 func TestDetailTitle(t *testing.T) {
@@ -300,14 +300,13 @@ func TestDetailURLNameNeverSent(t *testing.T) {
 	ts := newTestServer(t, nil)
 	fake := &fakeEmailer{}
 	n := detailNotifier(t, config.ConfigNotifications{
-		Ntfy: []config.ConfigNotificationNtfy{
+		Webhooks: []config.ConfigNotificationWebhook{
 			{
 				Name:                       "alerts",
+				Format:                     config.WebhookFormatNtfy,
 				URL:                        ts.URL + "/ddup",
 				ConfigNotificationDelivery: fastDelivery(),
 			},
-		},
-		Webhooks: []config.ConfigNotificationWebhook{
 			{
 				Name:                       "chat",
 				Format:                     "plain",

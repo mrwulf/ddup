@@ -28,8 +28,9 @@ providers:
       apiToken: "token"
       zoneId: "zone"
 notifications:
-  ntfy:
+  webhooks:
     - name: "alerts"
+      format: "ntfy"
       url: "https://ntfy.example.com/ddup"
 ` + extra
 		cfgPath := filepath.Join(t.TempDir(), "config.yaml")

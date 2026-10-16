@@ -2,7 +2,7 @@ package notify
 
 // This file is a fork extension: the detailed messages, enabled with notifications.detail
 // It restores what the fork sent before the typed notifications: the status emoji, the priority tiers, the standby endpoints and the error of each unhealthy endpoint
-// Upstream code calls it from three places only: Event.Detail, Notifier.message and Notifier.redactDetail
+// Upstream code calls it from three places only: Event.Detail, Notifier.message and Notify
 // To drop it, delete this file and those call sites, see FORK.md
 
 import (
@@ -33,7 +33,7 @@ type EndpointDetail struct {
 	// True if the endpoint is published in DNS, or would be after a failed update
 	Active bool
 	// Error of the latest check, if it failed
-	// The health checker removes URLs from it, and the notifier removes known secrets
+	// The health checker removes URLs from it
 	Error string
 	// Name of the endpoint when it was set in the configuration, used in titles and in the list of endpoints
 	// Empty when the name is only the default, which can be the URL of the health check
@@ -49,18 +49,17 @@ func (n *Notifier) message(ev Event) message {
 	return withDetail(m, ev)
 }
 
-// redactDetail removes the secrets from the errors and the labels of the endpoints
+// tidyDetail puts the error of each endpoint on one line and cuts it
 // It returns a copy, because the same detail can be shared by events that are still being delivered
-func (n *Notifier) redactDetail(d Detail) Detail {
+func tidyDetail(d Detail) Detail {
 	if len(d.Endpoints) == 0 {
 		return d
 	}
 
 	clean := maps.Clone(d.Endpoints)
 	for addr, ep := range clean {
-		ep.Label = n.redact.String(ep.Label)
 		// Joined errors, like those of the IP lookups, span several lines
-		msg := strings.ReplaceAll(n.redact.String(ep.Error), "\n", "; ")
+		msg := strings.ReplaceAll(ep.Error, "\n", "; ")
 		ep.Error = truncateRunes(msg, maxEndpointErrorLen)
 		clean[addr] = ep
 	}

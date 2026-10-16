@@ -1,7 +1,7 @@
 # What this fork adds
 
 This fork of [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup) carries features that are not upstream, or not yet.
-This branch is upstream `main` (`23ac0bb`) with the open upstream pull requests [#35](https://github.com/ItalyPaleAle/ddup/pull/35) to [#40](https://github.com/ItalyPaleAle/ddup/pull/40) merged, and the fork-only features below on top. What those pull requests add (the version footer, the endpoint history, `cname` and `proxied`, the IP lookup over HTTPS and the notifications) is not listed here.
+This branch is upstream `main` (`1ade733`, which already has the version footer, `DEVELOPMENT.md` and the Makefile targets) with the open upstream pull requests [#37](https://github.com/ItalyPaleAle/ddup/pull/37) to [#40](https://github.com/ItalyPaleAle/ddup/pull/40) merged, and the fork-only features below on top. What those pull requests add (the endpoint history, `cname` and `proxied`, the IP lookup over HTTPS and the notifications) is not listed here.
 Everything shown below is sample data: `example.com` names, documentation IP addresses (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`), and a made-up tunnel ID.
 [`UPSTREAM.md`](UPSTREAM.md) tracks each feature below against its upstream PR or decision.
 [`config.sample.yaml`](config.sample.yaml) documents every option.
@@ -41,11 +41,11 @@ The last button in the header cycles the theme between system, light and dark, a
 
 ## Detailed notifications
 
-The notifications of upstream PR [#40](https://github.com/ItalyPaleAle/ddup/pull/40) replaced the fork's webhook templates, and their messages lost what the fork used to send. `notifications.detail` (on by default here, `false` to turn it off) brings it back for ntfy, webhooks and email:
+The notifications of upstream PR [#40](https://github.com/ItalyPaleAle/ddup/pull/40) replaced the fork's webhook templates, and their messages lost what the fork used to send. `notifications.detail` (on by default here, `false` to turn it off) brings it back for ntfy (a webhook with `format: ntfy`), the other webhooks and email:
 
 - Endpoint names instead of addresses in the titles of `dns_updated` (`example.com now points to server1, server2`) and `dns_update_failed` (`DNS update failed for example.com (wanted server1)`). An endpoint whose name is only the default (its health-check URL, which can contain a token) is shown by its address in titles and in the body; a name that looks like a URL or has credentials is never used.
 - A green, yellow or red circle for the status of the domain in the title and in the `Status` line (ntfy keeps it in the tag only, so it isn't shown twice).
-- The error of the latest check of each unhealthy endpoint, without the endpoint's URL and with the configured secrets removed.
+- The error of the latest check of each unhealthy endpoint, without the endpoint's URL.
 - On domains with more than one priority, the priority of each endpoint, `healthy (standby)` for a healthy endpoint that is not published, and `Priority: <new> (was <old>)` when a `dns_updated` changes tier.
 
 The README shows an example under [Detailed messages](README.md#detailed-messages).

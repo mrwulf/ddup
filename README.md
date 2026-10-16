@@ -128,8 +128,8 @@ You can find an example of the configuration file, and a description of every op
     - `url`: HTTP URL to check for health status. Optional for endpoints that use `ipLookupFamily`, which are then not health-checked
     - `ip`: The IPv4 or IPv6 address to include in DNS records when healthy. IPv4 addresses create A records and IPv6 addresses create AAAA records. Exactly one of `ip`, `cname` and `ipLookupFamily` is required
     - `cname`: A hostname to publish in a CNAME record when healthy, as an alternative to `ip`. Exactly one of `ip`, `cname` and `ipLookupFamily` is required. See [CNAME records and Cloudflare proxying](#cname-records-and-cloudflare-proxying)
-    - `ipLookupFamily`: `4` or `6`. Instead of a fixed `ip`, ddup looks up the public IP address of the network it runs in and publishes it: `4` creates an A record and `6` an AAAA record. See [Dynamic DNS](#dynamic-dns). Exactly one of `ip`, `cname` and `ipLookupFamily` is required
-    - `ipLookupURLs`: Optional, only with `ipLookupFamily`. One or more services for this endpoint, which **replace** the top-level `ipLookupURLs` for it. See [Dynamic DNS](#dynamic-dns)
+    - `ipLookupFamily`: `4` or `6`. Instead of a fixed `ip`, ddup looks up the public IP address of the network it runs in and publishes it: `4` creates an A record and `6` an AAAA record. See [Dynamic DNS](#dynamic-dns). Exactly one of `ip`, `cname` and `ipLookupFamily` is required, unless the endpoint has its own `ipLookupURLs`: then `ipLookupFamily` defaults to `4`
+    - `ipLookupURLs`: Optional, and not together with `ip` or `cname`. One or more services for this endpoint, which **replace** the top-level `ipLookupURLs` for it. See [Dynamic DNS](#dynamic-dns)
     - `priority`: Optional non-negative integer for priority (default: 0). Only the healthy endpoints with the lowest priority value are published, and if none of them are healthy ddup falls back to the next value. When the preferred endpoints are healthy again (after `recoverAfter`, if set), ddup goes back to them. Endpoints with the same priority are all published together. If no endpoint is healthy, DNS is left unchanged. Fork only: endpoints that are not published are still health-checked and shown as "standby" in the dashboard
     - `host`: Optional hostname to include in the requests, when the request is made to an IP address or to a hostname different from the desired one
     - `providerOptions`: Optional settings that apply only with a specific DNS provider, under a key named after the provider. Using one with a domain whose provider is different is a configuration error. The only one is `cloudflare`, with `proxied` (see below)
@@ -236,30 +236,31 @@ domains:
         # This list replaces the top-level ipLookupURLs for this endpoint
         ipLookupURLs:
           - url: "https://ip.example.com/v4"
-          - url: "https://ip2.example.com/json"
-            pattern: '"ip":\s*"([^"]+)"'
+          - url: "https://ip2.example.com/plain"
 ```
 
 Different endpoints can have different lists, also in the same domain.
+
+This is also how an endpoint gets its address from something other than a public service. The URL can be anything that answers with just an IP address, for example a script on a server you own or a page on your router. It needs to use `https`.
 
 #### Rules
 
 - The list of an endpoint **replaces** the top-level list for that endpoint. They are never merged: the top-level services are not contacted for it.
 - An endpoint's list can have one entry or several. All the services that apply to an endpoint (all the entries of its own list, or all the top-level entries with its family) are asked at the same time. With one entry, only that service is asked.
-- At the top level, `family` (`4` or `6`) is required in every entry, because one list serves both families.
-- In an endpoint's list, `family` is optional, because `ipLookupFamily` already says it. If it is set, it must be equal to `ipLookupFamily`: ddup refuses a configuration that mixes IPv4 and IPv6 services for one endpoint.
+- At the top level, `family` (`4` or `6`) says which IP version the service answers for. It defaults to `4`.
+- In an endpoint's list, `family` is optional, because `ipLookupFamily` already says it. If the endpoint sets neither `ip` nor `ipLookupFamily`, `ipLookupFamily` is `4`. If it is set, it must be equal to `ipLookupFamily`: ddup refuses a configuration that mixes IPv4 and IPv6 services for one endpoint.
 - An endpoint with `ipLookupFamily` needs at least one service, from its own list or from a top-level entry with its family. Otherwise the configuration is rejected, and the message says what to add. An empty list (`ipLookupURLs: []`) on an endpoint is rejected as well.
 - `ipLookupURLs` on an endpoint with a fixed `ip` is rejected, because it would never be used.
-- `url` must use `https`. An answer that can't be authenticated could be spoofed, and ddup would publish it. The URL can contain a token: ddup leaves the query string and credentials out of logs, errors and names.
-- `pattern` is optional. By default the response body must contain only the address, as plain text. For a service that returns more (JSON, for example), `pattern` is a regular expression with exactly one capture group, which is the address.
+- `url` must use `https`. An answer that can't be authenticated could be spoofed, and ddup would publish it.
+- A service must answer with just the IP address, as plain text.
 
 #### How the lookup works
 
 - With no `url` the endpoint isn't health-checked: it's healthy as long as the lookup works. With a `url`, the endpoint is also health-checked as usual, and the address that was looked up is the one published.
 - Requests are made over the requested IP version only, so a service sees (and returns) an address of that family.
 - The first valid answer is used. The other services finish in the background, and ddup logs a warning if they return a different address. A service that fails or returns something that is not valid is skipped; if all of them fail, the lookup fails, the endpoint is unhealthy, and DNS is left as it is until an address is found (like any other unhealthy endpoint).
-- An answer is rejected unless it is just an IP address of the right family: an IPv4 address for `ipLookupFamily: 4` and an IPv6 address for `6`. Loopback, private, link-local, multicast and unspecified addresses are rejected too. Responses are limited to 4 KB, redirects are not followed, and each service has the health check `timeout` to answer.
-- Lookups connect directly and ignore proxy environment variables, and every lookup opens a new connection, so the answer always reflects the current network path.
+- An answer is rejected unless it is just an IP address of the right family: an IPv4 address for `ipLookupFamily: 4` and an IPv6 address for `6`. Loopback, private, carrier-grade NAT (`100.64.0.0/10`), link-local, multicast and unspecified addresses are rejected too. Responses are limited to 4 KB, redirects are not followed, and each service has the health check `timeout` to answer.
+- Requests use the proxy settings of the environment, like any other request, and every lookup opens a new connection, so the answer always reflects the current network path.
 - If two endpoints end up with the same address, it is published once.
 - ddup replaces every `A`/`AAAA` record at the name that isn't the looked-up address, so don't point it at a name that has other records.
 
@@ -471,7 +472,7 @@ providers:
 
 ddup can notify you when something happens to a domain. Notifications are optional: with no `notifications` section, ddup sends nothing.
 
-Notifications can be sent to [ntfy](https://ntfy.sh), to webhooks (plain text, Slack, or Discord), and by email.
+Notifications can be sent to webhooks (plain text, Slack, Discord, or [ntfy](https://ntfy.sh)), and by email.
 The messages are built by ddup and are not customizable.
 
 #### Events
@@ -479,7 +480,7 @@ The messages are built by ddup and are not customizable.
 | Event | When it is sent |
 | :---- | :-------------- |
 | `dns_updated` | The DNS records of a domain were changed. The message has the addresses published now and the ones that were in DNS before |
-| `dns_update_failed` | Updating the DNS records of a domain failed. The message has the error (with secrets removed). ddup retries at every check, and the same error is notified only once |
+| `dns_update_failed` | Updating the DNS records of a domain failed. The message has the error. ddup retries at every check, and the same error is notified only once |
 | `all_unhealthy` | A domain has no healthy endpoint. DNS is left unchanged. It is sent once, when the domain enters this state (including at startup), and not on every check |
 
 When a domain recovers after `all_unhealthy`, ddup updates DNS as usual and sends `dns_updated`. If the records in DNS are already the right ones, nothing changed and no event is sent.
@@ -489,15 +490,11 @@ Every notification has an optional `events` list to choose the events to receive
 #### Settings
 
 - `notifications`: Notifications to send
-  - `ntfy`: List of ntfy topics
-    - `name`: Name of the notification, used in logs. Required, and unique among the `ntfy` entries
-    - `url`: URL of the topic, including the topic name, such as `https://ntfy.example.com/ddup`. Required
-    - `token`: Optional access token, sent as `Authorization: Bearer <token>`
-    - `events`: Events to send (default: all)
   - `webhooks`: List of webhooks
     - `name`: Name of the notification, used in logs. Required, and unique among the `webhooks` entries
-    - `format`: `plain` (default, the message as plain text), `slack` (a Slack-compatible message), or `discord` (Discord's Slack-compatible endpoint)
-    - `url`: URL of the webhook. Required
+    - `format`: `plain` (default, the message as plain text), `slack` (a Slack-compatible message), `discord` (Discord's Slack-compatible endpoint), or `ntfy` (a message for an [ntfy](https://ntfy.sh) topic)
+    - `url`: URL of the webhook. Required. For `ntfy`, it includes the topic name, such as `https://ntfy.example.com/ddup`
+    - `token`: Optional token, sent as `Authorization: Bearer <token>`. Some formats do not use it
     - `events`: Events to send (default: all)
   - `email`: List of email notifications
     - `name`: Name of the notification, used in logs. Required, and unique among the `email` entries
@@ -506,7 +503,7 @@ Every notification has an optional `events` list to choose the events to receive
     - `events`: Events to send (default: all)
   - `detail`: Add the status emoji, the priority tiers and the error of each unhealthy endpoint to every message (default: `true`). Set it to `false` for the messages shown in [Messages](#messages). This is a fork extension (see [FORK.md](FORK.md#detailed-notifications))
 
-`ntfy` and `webhooks` entries also have these optional settings for delivering the request:
+`webhooks` entries also have these optional settings for delivering the request:
 
 - `timeout`: Timeout of each request (default: `20s`)
 - `maxAttempts`: Maximum number of attempts to send each notification, including the first (default: 3). Network errors and `408`, `429` and `5xx` responses are retried, while other errors are not. Set it to `1` to disable retries
@@ -516,7 +513,7 @@ Every notification has an optional `events` list to choose the events to receive
 Redirects are never followed.
 Emails are sent once, without retries.
 
-The URLs of webhooks, ntfy tokens, and email connection strings are secrets. Read them from files with `!file` (see [Configuration](#configuration)), so the configuration file does not contain them. ddup never writes these values to its logs: notification failures are logged with the `name` of the notification and the error, with the URL and secrets removed.
+The URLs and tokens of webhooks, and the email connection strings, are secrets. Read them from files with `!file` (see [Configuration](#configuration)), so the configuration file does not contain them. ddup never writes these values to its logs: notification failures are logged with the `name` of the notification and the error, with the URL and secrets removed.
 
 #### Examples
 
@@ -524,8 +521,9 @@ Send all events to an ntfy topic on a server in a private network:
 
 ```yaml
 notifications:
-  ntfy:
+  webhooks:
     - name: "alerts"
+      format: "ntfy"
       url: "https://ntfy.example.com/ddup"
       token: !file /run/secrets/ntfy-token
       allowPrivateDestinations: true
@@ -633,7 +631,7 @@ With `detail: true` (the default in this fork), the messages carry more than the
 - Titles name the endpoints instead of listing their addresses: `example.com now points to server1, server2` for `dns_updated`, and `DNS update failed for example.com (wanted server1)` for `dns_update_failed`. An endpoint without a `name` is shown by its address, because its default name is the URL of its health check, which can contain a token. The same goes for the list of endpoints in the body.
 - The title starts with a green, yellow or red circle for the status of the domain (all, some, or none of the endpoints are healthy), and so does the `Status` line. ntfy titles have no circle, because ntfy shows the status tag before the title.
 - When the domain has more than one priority, each endpoint shows its priority, and a healthy endpoint that is not published is marked `standby`. A `dns_updated` that moves to another tier has a `Priority: <new> (was <old>)` line.
-- An unhealthy endpoint shows the error of its latest check. The URL of the endpoint is removed from it (it can contain a token), and so are the secrets of the configuration. Long errors are cut at 200 characters.
+- An unhealthy endpoint shows the error of its latest check. The URL of the endpoint is removed from it (it can contain a token). Long errors are cut at 200 characters.
 
 `dns_updated` when the primary tier recovers, as a Slack message:
 
@@ -694,6 +692,7 @@ What changes with several replicas:
 The server has no authentication, so keep it on a trusted network. It exposes:
 
 - `GET /api/status` and `GET /api/status/{recordname}`: current status of the domains. Each endpoint has its `ip` (the IP address, or the hostname for an endpoint with `cname`), and the optional `name` (when the endpoint has one other than its URL), `type` of its DNS record (`A`, `AAAA` or `CNAME`), `proxied`, `priority`, `active` (the endpoint is published in DNS: it is healthy and has the lowest priority among the healthy endpoints) and `failureCount`. The last three are left out when they are false or 0
+  Each endpoint also has the optional fields `since` (when it last changed between healthy and unhealthy), `lastFailure` (the last time a check of it failed, kept after it recovers) and `sinceStart` (true when `since` is only the time of the first check after ddup started, because the real time is not known). For failed checks it also has `lastError` (the error of the last failed check), and `firstFailure` (the time of the first failed check of the current run of failures, left out once a check passes again). With `failureCount`, which counts the failed checks in a row, they show why an endpoint is in the warning state, where it failed some checks but is still healthy. They are kept in memory, so they start again when ddup restarts, and they are left out when they are not known
 - `POST /api/check`: runs health checks for all domains right away (the dashboard's "Check now" button), and returns the updated status. The request must include the header `X-Requested-By: ddup-dashboard`, which keeps other websites from triggering it through a visitor's browser. If a check finished less than 5 seconds ago, no new one is run. A forced check counts towards `attempts` and `recoverAfter` like a scheduled one, and the next scheduled check is then a full `interval` later
 - `GET /healthz`: returns 204 when the server is up
 

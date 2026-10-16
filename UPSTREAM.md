@@ -117,7 +117,7 @@ Decisions for the user: a build date in the footer, a name in the History popove
 - #40 should read the published address of a result (the looked-up address or the CNAME), not `Endpoint.IP`, in `notifyEndpointStates`; `Validate` must assign `err =` where #39 already declared it.
 - Each PR appends fields and methods to `domainChecker` in the same place: moving them to their own files (`since.go`, `lookups.go`, `notifications.go`) avoids most conflicts. Recommended merge order: 36, 35, 37, 38, 39, 40.
 - #35, #36 and #37 were written on `e02794b`; #38 to #40 on `23ac0bb`.
-- The fork's code to keep when they merge: `isLeader` around DNS updates and `notifyOutage`, `needsResync` (cleared when an update succeeds), the endpoint names and `active` in the status.
+- The fork's code to keep when they merge: `isLeader` around DNS updates and `notifyOutage`, `updatePending` (set after a standby or a failed update, cleared when an update succeeds), the endpoint names and `active` in the status.
 
 ## Branches on the fork (listing only, nothing is deleted)
 

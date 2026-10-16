@@ -37,9 +37,10 @@ type domainChecker struct {
 	// Priority of the endpoints that look up their IP address, by the address they found
 	dynamicPriorities map[string]int
 
-	// True after this instance was a standby, until it publishes the targets as the leader
+	// True if the DNS records may not be what they should be, so the next check updates them even if the published targets did not change
+	// It is set after this instance was a standby, until it publishes the targets as the leader, and after an update failed, until one works
 	// Only used by the health check loop
-	needsResync bool
+	updatePending bool
 
 	// True if no endpoint is healthy, and the all_unhealthy notification was sent
 	allUnhealthy bool

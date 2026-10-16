@@ -221,13 +221,11 @@ const EndpointRow = ({ endpoint, tiered }: { endpoint: DomainStatusEndpoint; tie
         {tiered && (
           <Chip icon={Layers} label={String(endpoint.priority ?? 0)} title={`Priority ${endpoint.priority ?? 0}`} />
         )}
-        {tiered && endpoint.healthy && (
-          <Chip
-            icon={endpoint.active ? Radio : CirclePause}
-            title={endpoint.active ? 'Published in DNS' : 'Healthy, on standby'}
-            className={endpoint.active ? publishedChipClass : undefined}
-          />
+        {/* Published is shown in every domain, also with one priority, so the rows look the same; standby only exists with tiers */}
+        {endpoint.healthy && endpoint.active && (
+          <Chip icon={Radio} title="Published in DNS" className={publishedChipClass} />
         )}
+        {tiered && endpoint.healthy && !endpoint.active && <Chip icon={CirclePause} title="Healthy, on standby" />}
         {failures > 0 && (
           <Chip
             icon={AlertTriangle}

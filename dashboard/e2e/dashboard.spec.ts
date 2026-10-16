@@ -326,13 +326,12 @@ test.describe('endpoints', () => {
         await expect(endpointRow(card, 'tunnel.example.com')).toContainText('tunnel')
     })
 
-    test('shows the type, the priority and whether the endpoint is published', async ({ page }) => {
+    test('shows the priority and whether the endpoint is published', async ({ page }) => {
         const card = domainCard(page, 'tiered.example')
 
         const published = endpointRow(card, '192.0.2.10')
         await expect(published.getByTitle('Priority 0')).toBeVisible()
         await expect(published.getByTitle('Published in DNS')).toBeVisible()
-        await expect(published.getByTitle('CNAME record')).toHaveCount(0)
 
         const failing = endpointRow(card, '2001:db8::10')
         await expect(failing.getByTitle('Priority 0')).toBeVisible()
@@ -344,8 +343,9 @@ test.describe('endpoints', () => {
         const standby = endpointRow(card, 'tunnel.example.com')
         await expect(standby.getByTitle('Priority 1')).toBeVisible()
         await expect(standby.getByTitle('Healthy, on standby')).toBeVisible()
-        await expect(standby.getByTitle('CNAME record')).toBeVisible()
-        await expect(standby.getByTitle('Proxied by Cloudflare')).toBeVisible()
+        // What an endpoint is configured as (a CNAME, proxied) is configuration, not status, so the row does not show it
+        await expect(standby.getByTitle('CNAME record')).toHaveCount(0)
+        await expect(standby.getByTitle('Proxied by Cloudflare')).toHaveCount(0)
     })
 
     test('every state has an icon and a text, so none relies on color alone', async ({ page }) => {
@@ -355,7 +355,7 @@ test.describe('endpoints', () => {
             { address: '2001:db8::10', texts: ['Unhealthy', 'Priority 0', '4 consecutive failed checks'] },
             {
                 address: 'tunnel.example.com',
-                texts: ['Healthy', 'Priority 1', 'Healthy, on standby', 'CNAME record', 'Proxied by Cloudflare'],
+                texts: ['Healthy', 'Priority 1', 'Healthy, on standby'],
             },
         ]
         for (const { address, texts } of rows) {
@@ -382,8 +382,6 @@ test.describe('endpoints', () => {
 
     test('the legend explains every icon', async ({ page }) => {
         for (const text of [
-            'CNAME record',
-            'Proxied by Cloudflare',
             'Priority n (lower is preferred)',
             'Published in DNS',
             'Healthy, on standby',

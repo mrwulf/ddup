@@ -16,8 +16,6 @@ import {
   Sun,
   Moon,
   Monitor,
-  Link2,
-  Cloud,
   Layers,
   Radio,
   CirclePause,
@@ -37,9 +35,6 @@ interface DomainStatusEndpoint {
   healthy: boolean
   // IP address, or CNAME hostname
   ip: string
-  // Record type: A, AAAA or CNAME
-  type?: string
-  proxied?: boolean
   // Lower values are preferred
   priority?: number
   // True if published in DNS
@@ -173,13 +168,6 @@ const ThemeSwitcher = () => {
 const Legend = () => (
   <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
     <span className="inline-flex items-center gap-1.5">
-      <Chip icon={Link2} title="CNAME record" /> CNAME record
-    </span>
-    <span className="inline-flex items-center gap-1.5">
-      <Chip icon={Cloud} title="Proxied by Cloudflare" className="text-orange-600 dark:text-orange-400" /> Proxied by
-      Cloudflare
-    </span>
-    <span className="inline-flex items-center gap-1.5">
       <Chip icon={Layers} label="n" title="Priority" /> Priority n (lower is preferred)
     </span>
     <span className="inline-flex items-center gap-1.5">
@@ -230,10 +218,6 @@ const EndpointRow = ({ endpoint, tiered }: { endpoint: DomainStatusEndpoint; tie
 
       {/* Always on the right: next to the name when it fits, and on its own line, still on the right, when it does not */}
       <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-        {endpoint.type === 'CNAME' && <Chip icon={Link2} title="CNAME record" />}
-        {endpoint.proxied && (
-          <Chip icon={Cloud} title="Proxied by Cloudflare" className="text-orange-600 dark:text-orange-400" />
-        )}
         {tiered && (
           <Chip icon={Layers} label={String(endpoint.priority ?? 0)} title={`Priority ${endpoint.priority ?? 0}`} />
         )}

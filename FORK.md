@@ -14,11 +14,10 @@ Each endpoint row shows what ddup publishes and why. Upstream shows the endpoint
 
 - **Name and address.** The name of the endpoint is the main label, with its address below. An endpoint with no name shows its address. The rows are ordered by priority.
 - **Priority and standby.** The row shows the endpoint's priority, and whether it is published in DNS or healthy on standby (see `fast-lb` and `ingress-lb`). The selection of the lowest priority is upstream's; the display and the published set in the status API are not.
-- **CNAME and proxied targets.** A chip for a CNAME record and one for a record proxied by Cloudflare, for example a Cloudflare Tunnel as the last resort (`app` has failed over to its tunnel). They read `type` and `proxied` from the status.
 - **Failed checks and domain errors.** A warning triangle with the number of consecutive failed checks. A domain that can't be updated shows the provider error (`status`).
 - **Legend.** The footer explains every icon, above the version of the build.
 
-Every chip has an icon with its own shape and a text for screen readers and the tooltip, so nothing depends on color alone.
+The rows show status, not configuration: whether an endpoint is a CNAME or proxied by Cloudflare is not shown, and the endpoint name is the place for it if wanted. Every chip has an icon with its own shape and a text for screen readers and the tooltip, so nothing depends on color alone.
 The **History** button on the line that counts the healthy endpoints, the version footer and the reload when the server is upgraded are upstream's.
 
 ### Theme

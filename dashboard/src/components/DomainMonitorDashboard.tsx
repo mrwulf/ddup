@@ -19,6 +19,8 @@ import {
   Layers,
   Radio,
   CirclePause,
+  CircleMinus,
+  CloudOff,
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -39,6 +41,8 @@ interface DomainStatusEndpoint {
   priority?: number
   // True if published in DNS
   active?: boolean
+  // Change that DNS still needs because the last update failed
+  pending?: 'add' | 'remove'
   failureCount?: number
   // When the endpoint last changed state, as an RFC 3339 time
   since?: string
@@ -115,6 +119,9 @@ const Chip = ({
   </span>
 )
 
+// Classes of the chip of an endpoint that DNS could not be updated for
+const failedChipClass = 'border-red-600/40 text-red-700 dark:border-red-400/40 dark:text-red-400'
+
 // Classes of the chip of an endpoint that is published in DNS
 const publishedChipClass = 'border-green-600/40 text-green-600 dark:border-green-400/40 dark:text-green-400'
 
@@ -177,6 +184,14 @@ const Legend = () => (
       <Chip icon={CirclePause} title="Healthy, on standby" /> Healthy, on standby
     </span>
     <span className="inline-flex items-center gap-1.5">
+      <Chip icon={CloudOff} title="Not published, the DNS update failed" className={failedChipClass} /> Not published,
+      the DNS update failed
+    </span>
+    <span className="inline-flex items-center gap-1.5">
+      <Chip icon={CircleMinus} title="Still in DNS, the DNS update failed" className={failedChipClass} /> Still in DNS,
+      the DNS update failed
+    </span>
+    <span className="inline-flex items-center gap-1.5">
       <Chip icon={AlertTriangle} label="n" title="Failed checks" className="text-yellow-700 dark:text-yellow-400" />{' '}
       Consecutive failed checks
     </span>
@@ -221,13 +236,17 @@ const EndpointRow = ({ endpoint, tiered }: { endpoint: DomainStatusEndpoint; tie
         {tiered && (
           <Chip icon={Layers} label={String(endpoint.priority ?? 0)} title={`Priority ${endpoint.priority ?? 0}`} />
         )}
-        {tiered && endpoint.healthy && (
-          <Chip
-            icon={endpoint.active ? Radio : CirclePause}
-            title={endpoint.active ? 'Published in DNS' : 'Healthy, on standby'}
-            className={endpoint.active ? publishedChipClass : undefined}
-          />
+        {/* Published is shown in every domain, also with one priority, so the rows look the same; standby only exists with tiers */}
+        {endpoint.healthy && endpoint.active && !endpoint.pending && (
+          <Chip icon={Radio} title="Published in DNS" className={publishedChipClass} />
         )}
+        {endpoint.pending === 'add' && (
+          <Chip icon={CloudOff} title="Not published, the DNS update failed" className={failedChipClass} />
+        )}
+        {endpoint.pending === 'remove' && (
+          <Chip icon={CircleMinus} title="Still in DNS, the DNS update failed" className={failedChipClass} />
+        )}
+        {tiered && endpoint.healthy && !endpoint.active && <Chip icon={CirclePause} title="Healthy, on standby" />}
         {failures > 0 && (
           <Chip
             icon={AlertTriangle}

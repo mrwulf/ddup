@@ -234,44 +234,46 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		dc.notifyDetail = newNotifyDetail(results, priorities, publishIPs)
 		hc.notifyOutage(dc, domainName, endpointStates, previousPublishIPs, len(newHealthyIPs) == 0, isLeader)
 
-		// Check if the published targets have changed
+		// Check if the published targets have changed, or if the last update failed
+		var updateErr string
 		switch {
 		case !isLeader:
 			// Standby: keep tracking health below, but leave DNS and notifications to the leader
-			dc.needsResync = true
+			dc.updatePending = true
 			domainLog.DebugContext(ctx, "Not the leader, skipping DNS update")
-		case dc.needsResync || !targetsMatch(previousTargets, publishTargets):
+		case dc.updatePending || !targetsMatch(previousTargets, publishTargets):
 			// Update DNS records
 			if len(publishTargets) > 0 {
 				var res dns.UpdateResult
 				res, err = dc.provider.UpdateRecords(ctx, dc.checker.GetDomain(), dc.ttl, publishTargets)
 				if err != nil {
 					domainLog.ErrorContext(ctx, "Error updating DNS records", "error", err)
-					dc.setError("Error updating DNS records: " + err.Error())
+					updateErr = "Error updating DNS records: " + err.Error()
 					hc.notifyUpdateFailed(dc, domainName, endpointStates, publishIPs, previousPublishIPs, err)
 
-					// Continue, so we don't update the cached previous IPs
-					continue
-				}
-
-				dc.swapNotifiedError("")
-				dc.needsResync = false
-				if res.Changed {
-					domainLog.InfoContext(ctx, "Updated DNS records", "targets", publishIPs, "previous", res.Previous)
-					hc.notify(notify.Event{
-						Type:      config.EventDNSUpdated,
-						Domain:    domainName,
-						Endpoints: endpointStates,
-						Published: publishIPs,
-						Previous:  res.Previous,
-					})
+					// Try again at the next check, even if the published targets do not change
+					dc.updatePending = true
 				} else {
-					domainLog.InfoContext(ctx, "DNS records already up to date", "targets", publishIPs)
+					dc.swapNotifiedError("")
+					dc.updatePending = false
+					dc.setPublishedIPs(publishIPs)
+					if res.Changed {
+						domainLog.InfoContext(ctx, "Updated DNS records", "targets", publishIPs, "previous", res.Previous)
+						hc.notify(notify.Event{
+							Type:      config.EventDNSUpdated,
+							Domain:    domainName,
+							Endpoints: endpointStates,
+							Published: publishIPs,
+							Previous:  res.Previous,
+						})
+					} else {
+						domainLog.InfoContext(ctx, "DNS records already up to date", "targets", publishIPs)
+					}
 				}
 			} else {
 				domainLog.WarnContext(ctx, "No healthy endpoints found, not updating DNS")
 				// Nothing to publish; when an endpoint recovers, the targets change and DNS is updated
-				dc.needsResync = false
+				dc.updatePending = false
 			}
 		default:
 			domainLog.DebugContext(ctx, "Published targets unchanged, skipping DNS update", "healthy", newHealthyIPs, "published", publishIPs)
@@ -280,8 +282,13 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 		// Record the state changes, so they match what the status reports
 		dc.recordCycle(results, newHealthyIPs)
 
-		// Update the stored previous IPs
+		// Update the stored state, also when the update failed, so the health of the endpoints keeps being tracked
 		dc.setState(newHealthyIPs, failedIPs)
+
+		// The state resets the error, so it is set again after it
+		if updateErr != "" {
+			dc.setError(updateErr)
+		}
 	}
 }
 

@@ -25,8 +25,10 @@ type DomainStatusEndpoint struct {
 	// Lower values are preferred: only the healthy endpoints with the lowest value are published
 	Priority int `json:"priority,omitempty"`
 	// True if the endpoint is published in DNS: it's healthy and has the lowest priority value among the healthy endpoints
-	Active       bool `json:"active,omitempty"`
-	FailureCount int  `json:"failureCount,omitempty"`
+	Active bool `json:"active,omitempty"`
+	// Change that DNS still needs because the last update failed: "add" for an endpoint that should be published and is not, "remove" for one that is still published and should not be
+	Pending      string `json:"pending,omitempty"`
+	FailureCount int    `json:"failureCount,omitempty"`
 	// When the endpoint last changed state, from healthy to failing or the other way around
 	Since *time.Time `json:"since,omitempty"`
 	// True if `since` is when ddup first checked the endpoint, not a state change, so the real start is unknown
@@ -63,6 +65,7 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 	targets := dc.getTargets()
 	priorities := dc.getPriorities()
 	published := selectLowestPriority(priorities, healthy)
+	inDNS := dc.getPublishedIPs()
 
 	// Endpoints in the unhealthy list could also be in the healthy one,
 	// if they failed a recent health check but still less than the max attempts
@@ -73,6 +76,7 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 			IP:           ip,
 			Priority:     priorities[ip],
 			Active:       isHealthy && slices.Contains(published, ip),
+			Pending:      pendingChange(lastError != "", isHealthy && slices.Contains(published, ip), slices.Contains(inDNS, ip)),
 			Type:         targets[ip].Type,
 			Proxied:      targets[ip].Proxied,
 			FailureCount: failureCount,
@@ -111,5 +115,20 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 		Provider:    dc.provider.Name(),
 		Error:       lastError,
 		Endpoints:   endpoints,
+	}
+}
+
+// pendingChange returns what DNS still needs for an endpoint, when the last update failed
+// The endpoint should be published if it is healthy and has the lowest priority, and it is in DNS if the last update that worked published it
+func pendingChange(updateFailed bool, shouldBePublished bool, inDNS bool) string {
+	switch {
+	case !updateFailed:
+		return ""
+	case shouldBePublished && !inDNS:
+		return "add"
+	case !shouldBePublished && inDNS:
+		return "remove"
+	default:
+		return ""
 	}
 }

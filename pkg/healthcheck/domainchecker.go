@@ -37,12 +37,16 @@ type domainChecker struct {
 	// Priority of the endpoints that look up their IP address, by the address they found
 	dynamicPriorities map[string]int
 
-	// True after this instance was a standby, until it publishes the targets as the leader
+	// True if the DNS records may not be what they should be, so the next check updates them even if the published targets did not change
+	// It is set after this instance was a standby, until it publishes the targets as the leader, and after an update failed, until one works
 	// Only used by the health check loop
-	needsResync bool
+	updatePending bool
 
 	// True if no endpoint is healthy, and the all_unhealthy notification was sent
 	allUnhealthy bool
+
+	// IPs published by the last update that worked: they are in DNS, even if a later update failed
+	publishedIPs []string
 
 	// Error of the latest failed DNS update, and the dns_update_failed notification was sent
 	notifiedError string
@@ -154,6 +158,21 @@ func (dc *domainChecker) getTimes(ip string) *endpointTimes {
 	}
 	cp := *t
 	return &cp
+}
+
+// getPublishedIPs returns the IPs published by the last update that worked
+func (dc *domainChecker) getPublishedIPs() []string {
+	dc.lock.RLock()
+	defer dc.lock.RUnlock()
+
+	return dc.publishedIPs
+}
+
+func (dc *domainChecker) setPublishedIPs(ips []string) {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	dc.publishedIPs = ips
 }
 
 func (dc *domainChecker) getState() (healthyIPs []string, failedIPs map[string]int, lastUpdated time.Time, lastError string) {

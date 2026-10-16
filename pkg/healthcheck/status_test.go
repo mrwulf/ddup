@@ -313,3 +313,61 @@ func TestEndpointSince_APIFields(t *testing.T) {
 	assert.NotContains(t, m, "lastError")
 	assert.NotContains(t, m, "firstFailure")
 }
+
+func TestEndpointPending(t *testing.T) {
+	ep1 := &config.ConfigEndpoint{Name: "endpoint1", IP: "1.1.1.1"}
+	ep2 := &config.ConfigEndpoint{Name: "endpoint2", IP: "2.2.2.2"}
+	mockProvider := dns.NewMockProvider(false)
+	mockChecker := &checker.MockChecker{
+		Domain:      "example.com",
+		MaxAttempts: 1,
+	}
+	hc := &HealthChecker{
+		domainCheckers: map[string]*domainChecker{
+			"example.com": {
+				checker:   mockChecker,
+				ttl:       60,
+				failedIPs: make(map[string]int),
+				provider:  mockProvider,
+			},
+		},
+	}
+	pending := func() map[string]string {
+		res := map[string]string{}
+		for _, e := range hc.GetDomainStatus("example.com").Endpoints {
+			res[e.IP] = e.Pending
+		}
+		return res
+	}
+	run := func(healthy1 bool, healthy2 bool) {
+		mockChecker.Results = []checker.Result{
+			{Endpoint: ep1, Healthy: healthy1},
+			{Endpoint: ep2, Healthy: healthy2},
+		}
+		hc.checkAndUpdateDNS(t.Context())
+	}
+
+	// Nothing is pending when the updates work
+	run(true, true)
+	assert.Equal(t, map[string]string{"1.1.1.1": "", "2.2.2.2": ""}, pending())
+
+	// The second endpoint fails and the provider is down: it is removed from the healthy ones, but it is still in DNS
+	mockProvider.ShouldError = true
+	run(true, false)
+	assert.Equal(t, map[string]string{"1.1.1.1": "", "2.2.2.2": "remove"}, pending())
+
+	// The provider works again, and nothing is pending
+	mockProvider.ShouldError = false
+	run(true, false)
+	assert.Equal(t, map[string]string{"1.1.1.1": "", "2.2.2.2": ""}, pending())
+
+	// The second endpoint recovers and the provider is down: it should be published, and it is not
+	mockProvider.ShouldError = true
+	run(true, true)
+	assert.Equal(t, map[string]string{"1.1.1.1": "", "2.2.2.2": "add"}, pending())
+
+	// The field is left out of the status when nothing is pending
+	raw, err := json.Marshal(DomainStatusEndpoint{IP: "1.1.1.1"})
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "pending")
+}

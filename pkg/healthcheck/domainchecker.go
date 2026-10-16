@@ -12,7 +12,7 @@ import (
 )
 
 type domainChecker struct {
-	lock        sync.Mutex
+	lock        sync.RWMutex
 	checker     checker.Checker
 	ttl         int
 	healthyIPs  []string
@@ -53,19 +53,27 @@ type domainChecker struct {
 
 	// When each endpoint last changed state and last failed, by IP; in memory only
 	times map[string]*endpointTimes
-	// Returns the current time; nil means time.Now
+	// Returns the current time
+	// nil means time.Now
 	clock func() time.Time
 }
 
 // endpointTimes tracks the state changes of one endpoint
 type endpointTimes struct {
 	healthy bool
-	// When the endpoint last changed state; for a new endpoint, when it was first checked
+	// When the endpoint last changed state
+	// For a new endpoint, when it was first checked
 	since time.Time
 	// True until the endpoint changes state for the first time, so `since` is only when ddup first saw it
 	sinceStart bool
-	// Last time a check of the endpoint failed; zero if never
+	// Last time a check of the endpoint failed
+	// Zero if never
 	lastFailure time.Time
+	// Error of the last failed check
+	lastError string
+	// First failed check of the current run of failures
+	// Zero and empty when the last check passed
+	firstFailure time.Time
 	// True if the endpoint was checked in the current cycle
 	seen bool
 }
@@ -78,7 +86,7 @@ func (dc *domainChecker) now() time.Time {
 }
 
 // recordCycle notes the outcome of a cycle of checks, given the IPs that are healthy after it
-// A failed check that is still within the allowed attempts only updates the last failure, because the endpoint is still healthy
+// A failed check that is still within the allowed attempts only updates the failure times and errors, because the endpoint is still healthy
 // Endpoints that were not checked in this cycle are forgotten
 func (dc *domainChecker) recordCycle(results []checker.Result, healthyIPs []string) {
 	dc.lock.Lock()
@@ -110,9 +118,20 @@ func (dc *domainChecker) recordCycle(results []checker.Result, healthyIPs []stri
 		}
 
 		t.seen = true
-		if !r.Healthy {
-			t.lastFailure = now
+		if r.Healthy {
+			t.firstFailure = time.Time{}
+			continue
 		}
+
+		errMsg := ""
+		if r.Error != nil {
+			errMsg = r.Error.Error()
+		}
+		if t.firstFailure.IsZero() {
+			t.firstFailure = now
+		}
+		t.lastFailure = now
+		t.lastError = errMsg
 	}
 
 	for ip, t := range dc.times {
@@ -126,8 +145,8 @@ func (dc *domainChecker) recordCycle(results []checker.Result, healthyIPs []stri
 
 // getTimes returns a copy of the times for an endpoint, or nil if there are none
 func (dc *domainChecker) getTimes(ip string) *endpointTimes {
-	dc.lock.Lock()
-	defer dc.lock.Unlock()
+	dc.lock.RLock()
+	defer dc.lock.RUnlock()
 
 	t := dc.times[ip]
 	if t == nil {
@@ -138,8 +157,8 @@ func (dc *domainChecker) getTimes(ip string) *endpointTimes {
 }
 
 func (dc *domainChecker) getState() (healthyIPs []string, failedIPs map[string]int, lastUpdated time.Time, lastError string) {
-	dc.lock.Lock()
-	defer dc.lock.Unlock()
+	dc.lock.RLock()
+	defer dc.lock.RUnlock()
 
 	return dc.healthyIPs, dc.failedIPs, dc.lastUpdated, dc.lastError
 }
@@ -164,8 +183,8 @@ func (dc *domainChecker) setError(err string) {
 
 // getRecovering returns a copy of the recovery counters
 func (dc *domainChecker) getRecovering() map[string]int {
-	dc.lock.Lock()
-	defer dc.lock.Unlock()
+	dc.lock.RLock()
+	defer dc.lock.RUnlock()
 
 	res := make(map[string]int, len(dc.recovering))
 	maps.Copy(res, dc.recovering)

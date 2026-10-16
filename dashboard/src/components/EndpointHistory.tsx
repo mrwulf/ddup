@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, type ReactNode } from 'react'
-import { CheckCircle, History, X, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle, History, X, XCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export interface EndpointHistoryItem {
@@ -8,16 +8,20 @@ export interface EndpointHistoryItem {
   name?: string
   since?: string
   sinceStart?: boolean
+  failureCount?: number
   lastFailure?: string
+  lastError?: string
+  firstFailure?: string
 }
 
-// Short local date and time, for example "Oct 9, 8:15 AM", with the year only for times that are not in the current year
-const timeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+// Short local date and time with seconds, for example "Oct 9, 8:15:30 AM", with the year only for times that are not in the current year
+const timeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' })
 const timeFormatThisYear = new Intl.DateTimeFormat(undefined, {
   month: 'short',
   day: 'numeric',
   hour: 'numeric',
   minute: '2-digit',
+  second: '2-digit',
 })
 
 const Time = ({ value }: { value: string }) => {
@@ -39,46 +43,67 @@ const viewportMargin = 8
 const buttonGap = 6
 const popoverWidth = 340
 
+const Failure = ({ label, time, error }: { label: string; time: string; error?: string }) => (
+  <div className="pl-[22px] text-muted-foreground">
+    {label}: <Time value={time} />
+    {error && <div className="break-words font-mono text-xs">{error}</div>}
+  </div>
+)
+
 const EndpointStatus = ({ endpoint }: { endpoint: EndpointHistoryItem }) => {
-  const state = endpoint.healthy ? 'Healthy' : 'Unhealthy'
-  let detail: ReactNode = null
+  const failureCount = endpoint.failureCount ?? 0
+  // A healthy endpoint with failed checks is still in DNS, but is one more failure away from being removed
+  const warning = endpoint.healthy && failureCount > 0
+  const state = warning ? 'Warning' : endpoint.healthy ? 'Healthy' : 'Unhealthy'
+
+  let since: ReactNode = null
   if (endpoint.since && endpoint.sinceStart) {
-    detail = (
+    since = (
       <>
-        {' '}
         since ddup started (<Time value={endpoint.since} />)
       </>
     )
   } else if (endpoint.since) {
-    detail = (
+    since = (
       <>
-        {' '}
         since <Time value={endpoint.since} />
       </>
     )
   }
 
   // The icon has a different shape for each state, and the text says the same, so the state doesn't depend on color
-  const Icon = endpoint.healthy ? CheckCircle : XCircle
+  const Icon = warning ? AlertTriangle : endpoint.healthy ? CheckCircle : XCircle
+  const color = warning
+    ? 'text-yellow-700 dark:text-yellow-400'
+    : endpoint.healthy
+      ? 'text-green-700 dark:text-green-400'
+      : 'text-red-700 dark:text-red-400'
+
+  // The most recent failure goes first
+  // The first failure is only different from the last one when more than one check failed
+  const showFirst = failureCount > 1 && endpoint.firstFailure
   return (
     <>
-      <div
-        className={cn(
-          'flex items-start gap-1.5',
-          endpoint.healthy ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'
-        )}
-      >
+      <div className={cn('flex items-start gap-1.5', color)}>
         <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <span>
           {state}
-          {detail}
+          {warning ? (
+            <>
+              : {failureCount} failed {failureCount === 1 ? 'check' : 'checks'} in a row
+            </>
+          ) : (
+            since && <> {since}</>
+          )}
         </span>
       </div>
-      {endpoint.healthy && endpoint.lastFailure && (
+      {!warning && !endpoint.healthy && failureCount > 0 && (
         <div className="pl-[22px] text-muted-foreground">
-          Last failure: <Time value={endpoint.lastFailure} />
+          {failureCount} failed {failureCount === 1 ? 'check' : 'checks'} in a row
         </div>
       )}
+      {endpoint.lastFailure && <Failure label="Last failure" time={endpoint.lastFailure} error={endpoint.lastError} />}
+      {showFirst && <Failure label="First failure" time={endpoint.firstFailure!} />}
     </>
   )
 }

@@ -13,6 +13,8 @@ interface DomainStatusEndpoint {
     since?: string
     sinceStart?: boolean
     lastFailure?: string
+    lastError?: string
+    firstFailure?: string
 }
 
 interface DomainStatus {
@@ -98,11 +100,33 @@ const historyDomains: DomainsResponse = {
                 failureCount: 3,
                 since: '2026-10-13T09:00:00Z',
                 lastFailure: '2026-10-13T09:29:00Z',
+                lastError: 'connection refused',
+                firstFailure: '2026-10-13T09:00:00Z',
             },
             // Healthy since the first check after ddup started
             { healthy: true, ip: '192.0.2.12', since: '2026-10-13T07:45:00Z', sinceStart: true },
             // From a server that does not report the times
             { healthy: true, ip: '192.0.2.13' },
+            // Warning: healthy, but the last checks failed
+            {
+                healthy: true,
+                ip: '192.0.2.14',
+                failureCount: 2,
+                since: '2026-10-12T10:00:00Z',
+                firstFailure: '2026-10-13T09:27:00Z',
+                lastFailure: '2026-10-13T09:28:00Z',
+                lastError: 'status 503',
+            },
+            // Warning after a single failed check
+            {
+                healthy: true,
+                ip: '192.0.2.15',
+                failureCount: 1,
+                since: '2026-10-12T10:00:00Z',
+                firstFailure: '2026-10-13T09:28:30Z',
+                lastFailure: '2026-10-13T09:28:30Z',
+                lastError: 'status 500',
+            },
         ],
     },
     'other.example': {
@@ -786,20 +810,23 @@ test.describe('endpoint history', () => {
     test('lists the endpoints with how long they have been healthy or failing', async ({ page }) => {
         await historyButton(page, 'history.example').click()
         const items = historyDialog(page, 'history.example').getByRole('listitem')
-        await expect(items).toHaveCount(4)
+        await expect(items).toHaveCount(6)
 
         // Recovered, with the last failure
         await expect(items.nth(0)).toContainText('192.0.2.10')
-        await expect(items.nth(0)).toContainText('Healthy since Oct 9, 8:15 AM')
-        await expect(items.nth(0)).toContainText('Last failure: Oct 9, 8:10 AM')
+        await expect(items.nth(0)).toContainText('Healthy since Oct 9, 8:15:00 AM')
+        await expect(items.nth(0)).toContainText('Last failure: Oct 9, 8:10:00 AM')
 
         // Failing
         await expect(items.nth(1)).toContainText('192.0.2.11')
-        await expect(items.nth(1)).toContainText('Unhealthy since Oct 13, 9:00 AM')
+        await expect(items.nth(1)).toContainText('Unhealthy since Oct 13, 9:00:00 AM')
+        await expect(items.nth(1)).toContainText('3 failed checks in a row')
+        await expect(items.nth(1)).toContainText('First failure: Oct 13, 9:00:00 AM')
+        await expect(items.nth(1)).toContainText('Last failure: Oct 13, 9:29:00 AMconnection refused')
 
         // The start is not known
         await expect(items.nth(2)).toContainText('192.0.2.12')
-        await expect(items.nth(2)).toContainText('Healthy since ddup started (Oct 13, 7:45 AM)')
+        await expect(items.nth(2)).toContainText('Healthy since ddup started (Oct 13, 7:45:00 AM)')
         await expect(items.nth(2)).not.toContainText('Last failure')
 
         // No times from the server: only the state
@@ -807,6 +834,23 @@ test.describe('endpoint history', () => {
         await expect(items.nth(3)).toContainText('Healthy')
         await expect(items.nth(3)).not.toContainText('since')
         await expect(items.nth(3)).not.toContainText('Last failure')
+
+        // Warning: healthy, with the failed checks in a row and the first and last failure
+        await expect(items.nth(4)).toContainText('192.0.2.14')
+        await expect(items.nth(4)).toContainText('Warning: 2 failed checks in a row')
+        await expect(items.nth(4)).not.toContainText('Healthy since')
+        await expect(items.nth(4)).toContainText('First failure: Oct 13, 9:27:00 AM')
+        await expect(items.nth(4)).toContainText('Last failure: Oct 13, 9:28:00 AMstatus 503')
+
+        // The last failure is above the first one
+        const warningText = (await items.nth(4).innerText()).replace(/\s+/g, ' ')
+        expect(warningText.indexOf('Last failure')).toBeGreaterThan(-1)
+        expect(warningText.indexOf('Last failure')).toBeLessThan(warningText.indexOf('First failure'))
+
+        // A single failed check is shown once
+        await expect(items.nth(5)).toContainText('Warning: 1 failed check in a row')
+        await expect(items.nth(5)).toContainText('Last failure: Oct 13, 9:28:30 AMstatus 500')
+        await expect(items.nth(5)).not.toContainText('First failure')
 
         // The times are real time elements
         const first = items.nth(0).locator('time')
@@ -829,28 +873,29 @@ test.describe('endpoint history', () => {
         await expect(cardTitles(page)).toHaveText(['old.example'])
 
         await historyButton(page, 'old.example').click()
-        await expect(historyDialog(page, 'old.example')).toContainText('Healthy since Dec 31, 2025, 11:30 PM')
+        await expect(historyDialog(page, 'old.example')).toContainText('Healthy since Dec 31, 2025, 11:30:00 PM')
     })
 
     test('the button is on the line that counts the healthy endpoints', async ({ page }) => {
         const card = domainCard(page, 'history.example')
-        const line = card.getByText('3/4 endpoints healthy').locator('xpath=..')
+        const line = card.getByText('5/6 endpoints healthy').locator('xpath=..')
         await expect(line.getByRole('button', { name: 'History of history.example' })).toBeVisible()
 
-        // The time of the last update stays in the second row of the card
-        await expect(card.getByText('Provider: cloudflare').locator('xpath=..')).toContainText('2026')
+        // The time of the last update is only in the history dialog
+        await expect(card.getByText('Provider: cloudflare')).toBeVisible()
+        await expect(card.locator('time')).toHaveCount(0)
     })
 
-    test('repeats the time of the last update as the first line of the dialog', async ({ page }) => {
+    test('shows the time of the last update, with seconds, as the first line of the dialog', async ({ page }) => {
         await historyButton(page, 'history.example').click()
         const dialog = historyDialog(page, 'history.example')
-        await expect(dialog).toContainText('Last updated: Oct 13, 9:30 AM')
+        await expect(dialog).toContainText('Last updated: Oct 13, 9:30:00 AM')
         await expect(dialog.locator('time[datetime="2026-10-13T09:30:00Z"]')).toHaveCount(1)
 
         // The heading comes first, then the time
         const lines = await dialog.locator('h2, p').allInnerTexts()
         expect(lines[0]).toBe('Endpoint history of history.example')
-        expect(lines[1]).toBe('Last updated: Oct 13, 9:30 AM')
+        expect(lines[1]).toBe('Last updated: Oct 13, 9:30:00 AM')
     })
 
     test('the endpoint rows stay the same', async ({ page }) => {

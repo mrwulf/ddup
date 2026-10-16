@@ -45,11 +45,11 @@ var ErrNotRunning = errors.New("health checker is not running")
 
 // NewHealthChecker creates a new HealthChecker instance
 func NewHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.AppMetrics) (*HealthChecker, error) {
-	return newHealthChecker(dnsProviders, metrics)
+	return newHealthChecker(dnsProviders, metrics, iplookup.Options{})
 }
 
 // newHealthChecker is NewHealthChecker with options for the IP lookups, so tests can trust their own services
-func newHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.AppMetrics, lookupOpts ...iplookup.Option) (*HealthChecker, error) {
+func newHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.AppMetrics, lookupOpts iplookup.Options) (*HealthChecker, error) {
 	cfg := config.Get()
 
 	dcs := make(map[string]*domainChecker, len(cfg.Domains))
@@ -58,10 +58,7 @@ func newHealthChecker(dnsProviders map[string]dns.Provider, metrics *appmetrics.
 		if !ok || provider == nil {
 			return nil, fmt.Errorf("domain '%s' references DNS provider '%s' that is not configured", d.RecordName, d.Provider)
 		}
-		lookupers, err := buildLookupers(cfg, d, lookupOpts...)
-		if err != nil {
-			return nil, fmt.Errorf("domain '%s': %w", d.RecordName, err)
-		}
+		lookupers := buildLookupers(cfg, d, lookupOpts)
 		dcs[d.RecordName] = &domainChecker{
 			checker:    checker.New(d.RecordName, d.Endpoints, d.HealthChecks, metrics, lookupers),
 			ttl:        d.TTL,

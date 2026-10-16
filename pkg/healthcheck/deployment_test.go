@@ -188,8 +188,8 @@ func TestDeploymentLikeConfig_Rejections(t *testing.T) {
 		"a lookup service over http": func(cfg *config.Config) {
 			cfg.Domains[2].Endpoints[0].IPLookupURLs[0].URL = "http://lookup-a.example.com"
 		},
-		"a lookup endpoint without a family": func(cfg *config.Config) {
-			cfg.Domains[2].Endpoints[0].IPLookupFamily = 0
+		"a lookup endpoint that also has a fixed ip": func(cfg *config.Config) {
+			cfg.Domains[2].Endpoints[0].IP = "192.0.2.1"
 		},
 		"a tunnel and a VPS with the same priority": func(cfg *config.Config) {
 			cfg.Domains[0].Endpoints[2].Priority = 0
@@ -518,10 +518,10 @@ func (r *fakeRelay) received() []relayMessage {
 }
 
 // trust returns the options that make the lookups trust the certificate of the test servers
-func trust(srv *httptest.Server) iplookup.Option {
+func trust(srv *httptest.Server) iplookup.Options {
 	pool := x509.NewCertPool()
 	pool.AddCert(srv.Certificate())
-	return iplookup.WithTLSConfig(&tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12})
+	return iplookup.Options{TLSConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
 }
 
 // replica is an instance of ddup, with its elector and its own DNS provider

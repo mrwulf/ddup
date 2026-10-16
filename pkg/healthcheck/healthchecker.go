@@ -256,6 +256,7 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 				} else {
 					dc.swapNotifiedError("")
 					dc.updatePending = false
+					dc.setPublishedIPs(publishIPs)
 					if res.Changed {
 						domainLog.InfoContext(ctx, "Updated DNS records", "targets", publishIPs, "previous", res.Previous)
 						hc.notify(notify.Event{

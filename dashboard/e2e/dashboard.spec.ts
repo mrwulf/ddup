@@ -9,6 +9,7 @@ interface DomainStatusEndpoint {
     proxied?: boolean
     priority?: number
     active?: boolean
+    pending?: 'add' | 'remove'
     failureCount?: number
     since?: string
     sinceStart?: boolean
@@ -320,6 +321,61 @@ const singlePriorityDomains: DomainsResponse = {
     },
 }
 
+// The last DNS update failed: a healthy endpoint is not published yet, and a failing one is still in DNS
+const pendingDomains: DomainsResponse = {
+    'pending.example': {
+        lastUpdated,
+        provider: 'cloudflare',
+        error: 'Error updating DNS records: boom',
+        endpoints: [
+            { name: 'ok', healthy: true, ip: '203.0.113.10', active: true },
+            { name: 'new', healthy: true, ip: '203.0.113.11', active: true, pending: 'add' },
+            { name: 'old', healthy: false, ip: '203.0.113.12', failureCount: 2, pending: 'remove' },
+        ],
+    },
+}
+
+test.describe('endpoints with a failed DNS update', () => {
+    test.beforeEach(async ({ page }) => {
+        await mockStatus(page, pendingDomains)
+        await page.goto('/')
+        await expect(cardTitles(page)).toHaveText(['pending.example'])
+    })
+
+    test('shows what could not be published or removed', async ({ page }) => {
+        const card = domainCard(page, 'pending.example')
+
+        // An endpoint that is in DNS as it should shows the published chip
+        await expect(endpointRow(card, '203.0.113.10').getByTitle('Published in DNS')).toBeVisible()
+
+        // A healthy endpoint that should be published, but is not: it must not look published
+        const added = endpointRow(card, '203.0.113.11')
+        await expect(added.getByTitle('Not published, the DNS update failed')).toBeVisible()
+        await expect(added.getByTitle('Published in DNS')).toHaveCount(0)
+
+        // A failing endpoint that should be removed, but still is in DNS
+        const removed = endpointRow(card, '203.0.113.12')
+        await expect(removed.getByTitle('Still in DNS, the DNS update failed')).toBeVisible()
+        await expect(removed.getByTitle('Published in DNS')).toHaveCount(0)
+    })
+
+    test('each chip has an icon and a text', async ({ page }) => {
+        const card = domainCard(page, 'pending.example')
+        for (const [address, text] of [
+            ['203.0.113.11', 'Not published, the DNS update failed'],
+            ['203.0.113.12', 'Still in DNS, the DNS update failed'],
+        ]) {
+            const row = endpointRow(card, address)
+            await expect(row.getByText(text, { exact: true })).toHaveCount(1)
+            await expect(row.locator('svg').first()).toHaveAttribute('aria-hidden', 'true')
+        }
+    })
+
+    test('the domain error is still shown', async ({ page }) => {
+        await expect(domainCard(page, 'pending.example')).toContainText('Error updating DNS records: boom')
+    })
+})
+
 test.describe('endpoints of a domain with one priority', () => {
     test.beforeEach(async ({ page }) => {
         await mockStatus(page, singlePriorityDomains)
@@ -420,6 +476,8 @@ test.describe('endpoints', () => {
             'Priority n (lower is preferred)',
             'Published in DNS',
             'Healthy, on standby',
+            'Not published, the DNS update failed',
+            'Still in DNS, the DNS update failed',
             'Consecutive failed checks',
         ]) {
             await expect(page.getByText(text).last()).toBeVisible()

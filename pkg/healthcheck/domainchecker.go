@@ -45,6 +45,9 @@ type domainChecker struct {
 	// True if no endpoint is healthy, and the all_unhealthy notification was sent
 	allUnhealthy bool
 
+	// IPs published by the last update that worked: they are in DNS, even if a later update failed
+	publishedIPs []string
+
 	// Error of the latest failed DNS update, and the dns_update_failed notification was sent
 	notifiedError string
 
@@ -155,6 +158,21 @@ func (dc *domainChecker) getTimes(ip string) *endpointTimes {
 	}
 	cp := *t
 	return &cp
+}
+
+// getPublishedIPs returns the IPs published by the last update that worked
+func (dc *domainChecker) getPublishedIPs() []string {
+	dc.lock.RLock()
+	defer dc.lock.RUnlock()
+
+	return dc.publishedIPs
+}
+
+func (dc *domainChecker) setPublishedIPs(ips []string) {
+	dc.lock.Lock()
+	defer dc.lock.Unlock()
+
+	dc.publishedIPs = ips
 }
 
 func (dc *domainChecker) getState() (healthyIPs []string, failedIPs map[string]int, lastUpdated time.Time, lastError string) {

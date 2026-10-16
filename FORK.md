@@ -14,6 +14,7 @@ Each endpoint row shows what ddup publishes and why. Upstream shows the endpoint
 
 - **Name and address.** The name of the endpoint is the main label, with its address below. An endpoint with no name shows its address. The rows are ordered by priority.
 - **Priority and standby.** In a domain with more than one priority, the row shows the endpoint's priority, and whether it is published in DNS or healthy on standby (see `fast-lb` and `ingress-lb`). A healthy endpoint that is published in DNS shows the published chip also in a domain with one priority, so the rows look the same in every domain. The selection of the lowest priority is upstream's; the display and the published set in the status API are not.
+- **A failed DNS update.** When the provider can't be updated, an endpoint that should be published but is not shows "Not published", and one that should be removed but still is in DNS shows "Still in DNS" (`pending` in the status API: `add` or `remove`). The published chip is not shown for the first. The domain shows the provider error.
 - **Failed checks and domain errors.** A warning triangle with the number of consecutive failed checks. A domain that can't be updated shows the provider error (`status`).
 - **Legend.** The footer explains every icon, above the version of the build.
 

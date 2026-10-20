@@ -1,7 +1,7 @@
 # What this fork adds
 
 This fork of [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup) carries features that are not upstream, or not yet.
-This branch is upstream `main` (`1ade733`, which already has the version footer, `DEVELOPMENT.md` and the Makefile targets) with the open upstream pull requests [#37](https://github.com/ItalyPaleAle/ddup/pull/37) to [#40](https://github.com/ItalyPaleAle/ddup/pull/40) merged, and the fork-only features below on top. What those pull requests add (the endpoint history, `cname` and `proxied`, the IP lookup over HTTPS and the notifications) is not listed here.
+This branch is upstream `main` (`d5644c2`, which has the notifications, the docs site and the version footer) merged in, with the open upstream pull requests [#37](https://github.com/ItalyPaleAle/ddup/pull/37) to [#39](https://github.com/ItalyPaleAle/ddup/pull/39) on top, and the fork-only features below. What those pull requests add (the endpoint history, `cname` and `proxied`, the IP lookup over HTTPS) is not listed here; the notifications are upstream's.
 Everything shown below is sample data: `example.com` names, documentation IP addresses (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`), and a made-up tunnel ID.
 [`UPSTREAM.md`](UPSTREAM.md) tracks each feature below against its upstream PR or decision.
 [`config.sample.yaml`](config.sample.yaml) documents every option.

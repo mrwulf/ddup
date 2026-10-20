@@ -19,6 +19,9 @@ import (
 // Maximum length of the error of an endpoint in a message, in runes
 const maxEndpointErrorLen = 200
 
+// Text that replaces the credentials of a URL in an error, see healthcheck/notifydetail.go
+const redacted = "[redacted]"
+
 // Detail is what the detailed messages add to an event
 // The zero value is valid, and the messages show what they can without it
 type Detail struct {

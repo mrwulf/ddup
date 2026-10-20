@@ -272,7 +272,8 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 				}
 			} else {
 				domainLog.WarnContext(ctx, "No healthy endpoints found, not updating DNS")
-				// Nothing to publish; when an endpoint recovers, the targets change and DNS is updated
+
+				// There is nothing to publish, and DNS is left as it is
 				dc.updatePending = false
 			}
 		default:

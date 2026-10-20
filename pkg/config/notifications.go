@@ -27,7 +27,7 @@ func NotificationEvents() []NotificationEvent {
 }
 
 // Webhook formats
-// The list must match the formats supported by go-kit, and a test checks that
+// The list must match the formats supported by go-kit
 const (
 	WebhookFormatPlain   = "plain"
 	WebhookFormatSlack   = "slack"
@@ -42,7 +42,7 @@ type ConfigNotifications struct {
 	Webhooks []ConfigNotificationWebhook `yaml:"webhooks"`
 
 	// Notifications sent by email
-	Email []ConfigNotificationEmail `yaml:"email"`
+	Emails []ConfigNotificationEmail `yaml:"emails"`
 
 	// Fork extension: adds the status emoji, the priority tiers and the error of each unhealthy endpoint to every message
 	// See FORK.md
@@ -51,7 +51,6 @@ type ConfigNotifications struct {
 }
 
 // ConfigNotificationDelivery are the delivery settings shared by the notifications sent with HTTP requests
-// For all of them, zero values mean using the defaults
 type ConfigNotificationDelivery struct {
 	// Timeout for each request
 	// +default 20s
@@ -70,6 +69,10 @@ type ConfigNotificationDelivery struct {
 	// Enable it only if the destination is on a trusted internal network
 	// +default false
 	AllowPrivateDestinations bool `yaml:"allowPrivateDestinations"`
+
+	// Optional token sent in the Authorization header as "Bearer <token>"
+	// Some formats may not use it
+	Token string `yaml:"token"`
 }
 
 // ConfigNotificationWebhook configures notifications sent to a webhook
@@ -86,14 +89,8 @@ type ConfigNotificationWebhook struct {
 	Format string `yaml:"format"`
 
 	// URL of the webhook
-	// For the "ntfy" format, it includes the topic name (for example "https://ntfy.example.com/ddup")
-	// Slack and Discord URLs are secrets
 	// +required
-	URL string `json:"-" yaml:"url"`
-
-	// Optional token sent in the Authorization header as "Bearer <token>"
-	// Some formats may not use it
-	Token string `json:"-" yaml:"token"`
+	URL string `yaml:"url"`
 
 	// Events to send, among "dns_updated", "dns_update_failed" and "all_unhealthy"
 	// +default all events
@@ -108,9 +105,8 @@ type ConfigNotificationEmail struct {
 	Name string `yaml:"name"`
 
 	// Connection string for the email provider, such as "resend://<api-key>?fromAddress=ddup@example.com" or "smtp://..."
-	// It contains secrets
 	// +required
-	ConnectionString string `json:"-" yaml:"connectionString"`
+	ConnectionString string `yaml:"connectionString"`
 
 	// Recipients of the email: one email is sent to each address
 	// +required
@@ -123,7 +119,6 @@ type ConfigNotificationEmail struct {
 
 // validate the notifications configuration and sets the defaults
 // URLs, timeouts, and connection strings are validated by go-kit when the notifications are created
-// Error messages never include URLs, tokens, or connection strings, because they are secrets
 func (c *ConfigNotifications) validate() error {
 	names := make(map[string]int, len(c.Webhooks))
 	for i := range c.Webhooks {
@@ -141,7 +136,7 @@ func (c *ConfigNotifications) validate() error {
 			w.Format = WebhookFormatPlain
 		case WebhookFormatPlain, WebhookFormatSlack, WebhookFormatDiscord, WebhookFormatNtfy:
 		default:
-			return fmt.Errorf("%s is invalid: unknown format %q (valid formats: %s, %s, %s, %s)", label, w.Format, WebhookFormatPlain, WebhookFormatSlack, WebhookFormatDiscord, WebhookFormatNtfy)
+			return fmt.Errorf("%s is invalid: unknown format %q", label, w.Format)
 		}
 
 		w.Events, err = validateNotificationEvents(w.Events)
@@ -151,9 +146,10 @@ func (c *ConfigNotifications) validate() error {
 	}
 
 	clear(names)
-	for i := range c.Email {
-		e := &c.Email[i]
-		label := notificationLabel("email", i, e.Name)
+
+	for i := range c.Emails {
+		e := &c.Emails[i]
+		label := notificationLabel("emails", i, e.Name)
 
 		err := checkNotificationName(names, i, e.Name)
 		if err != nil {
@@ -161,14 +157,16 @@ func (c *ConfigNotifications) validate() error {
 		}
 
 		if len(e.To) == 0 {
-			return fmt.Errorf("%s is invalid: to is empty; specify at least one recipient", label)
+			return fmt.Errorf("%s is invalid: to must have at least one recipient", label)
 		}
+
 		for ti, addr := range e.To {
 			_, err = mail.ParseAddress(addr)
 			if err != nil {
 				return fmt.Errorf("%s is invalid: to[%d] is not a valid email address", label, ti)
 			}
 		}
+
 		e.Events, err = validateNotificationEvents(e.Events)
 		if err != nil {
 			return fmt.Errorf("%s is invalid: %w", label, err)
@@ -212,6 +210,7 @@ func validateNotificationEvents(events []NotificationEvent) ([]NotificationEvent
 			for i, v := range valid {
 				names[i] = string(v)
 			}
+
 			return nil, fmt.Errorf("unknown event %q (valid events: %s)", ev, strings.Join(names, ", "))
 		}
 	}

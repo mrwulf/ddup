@@ -176,8 +176,8 @@ func TestDeploymentLikeConfig_Structure(t *testing.T) {
 	assert.Equal(t, 5, ntfy.MaxAttempts)
 	assert.Equal(t, 2*time.Second, ntfy.RetryInterval)
 	assert.Equal(t, 10*time.Second, ntfy.Timeout)
-	require.Len(t, cfg.Notifications.Email, 1)
-	email := cfg.Notifications.Email[0]
+	require.Len(t, cfg.Notifications.Emails, 1)
+	email := cfg.Notifications.Emails[0]
 	assert.Equal(t, deploymentSecrets["EMAIL_CONNECTION_STRING"], email.ConnectionString)
 	assert.Equal(t, []string{mailTo}, email.To)
 	assert.Contains(t, email.ConnectionString, "tls=none")
@@ -604,7 +604,7 @@ func newDeployment(t *testing.T) *deployment {
 		}
 	}
 	cfg.Notifications.Webhooks[0].URL = d.ntfy.URL + "/ddup"
-	cfg.Notifications.Email[0].ConnectionString = strings.Replace(cfg.Notifications.Email[0].ConnectionString, relayAddr, d.relay.Addr().String(), 1)
+	cfg.Notifications.Emails[0].ConnectionString = strings.Replace(cfg.Notifications.Emails[0].ConnectionString, relayAddr, d.relay.Addr().String(), 1)
 
 	// The notifier is created from the configuration, as in main
 	var err error
@@ -913,7 +913,7 @@ func TestDeploymentLike_NtfyNeedsAllowPrivateDestinations(t *testing.T) {
 			cfg.Notifications.Webhooks[0].URL = ntfy.URL + "/ddup"
 			cfg.Notifications.Webhooks[0].AllowPrivateDestinations = allow
 			cfg.Notifications.Webhooks[0].MaxAttempts = 1
-			cfg.Notifications.Email = nil
+			cfg.Notifications.Emails = nil
 
 			notifier, err := notify.New(t.Context(), cfg)
 			require.NoError(t, err)

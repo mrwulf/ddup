@@ -87,7 +87,7 @@ notifications:
       timeout: "10s"
       maxAttempts: 5
       retryInterval: "2s"
-  email:
+  emails:
     - name: "email"
       connectionString: !file /etc/ddup/secrets/EMAIL_CONNECTION_STRING
       to:

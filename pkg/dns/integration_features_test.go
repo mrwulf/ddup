@@ -288,7 +288,7 @@ func TestIntegrationSampleConfigHasEveryFeature(t *testing.T) {
 	assert.True(t, hasExpectStatus, "healthChecks.expectStatus")
 	assert.NotEmpty(t, cfg.IPLookupURLs, "top-level ipLookupURLs")
 	assert.NotEmpty(t, cfg.Notifications.Webhooks, "webhook notifications")
-	assert.NotEmpty(t, cfg.Notifications.Email, "email notifications")
+	assert.NotEmpty(t, cfg.Notifications.Emails, "email notifications")
 	assert.True(t, cfg.Server.Enabled, "server")
 
 	// The notifier can be created from the sample, as main does at startup

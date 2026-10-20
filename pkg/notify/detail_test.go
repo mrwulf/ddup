@@ -168,7 +168,7 @@ func TestDetailEmail(t *testing.T) {
 	fake := &fakeEmailer{}
 
 	n := detailNotifier(t, config.ConfigNotifications{
-		Email: []config.ConfigNotificationEmail{
+		Emails: []config.ConfigNotificationEmail{
 			{
 				Name:             "ops",
 				ConnectionString: "resend://" + testResendKey + "?fromAddress=ddup@example.com",
@@ -314,7 +314,7 @@ func TestDetailURLNameNeverSent(t *testing.T) {
 				ConfigNotificationDelivery: fastDelivery(),
 			},
 		},
-		Email: []config.ConfigNotificationEmail{
+		Emails: []config.ConfigNotificationEmail{
 			{
 				Name:             "ops",
 				ConnectionString: "resend://" + testResendKey + "?fromAddress=ddup@example.com",

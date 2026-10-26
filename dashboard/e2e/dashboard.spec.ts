@@ -218,15 +218,31 @@ test.describe('domain list', () => {
     })
 
     test('shows the health of each domain', async ({ page }) => {
-        await expect(domainBadge(page, 'healthy.example')).toHaveText('Healthy')
-        await expect(domainBadge(page, 'ipv6.example')).toHaveText('Healthy')
-        await expect(domainBadge(page, 'partial.example')).toHaveText('Warning')
-        await expect(domainBadge(page, 'down.example')).toHaveText('Unhealthy')
+        await expect(domainBadge(page, 'healthy.example')).toHaveAccessibleName('Healthy')
+        await expect(domainBadge(page, 'ipv6.example')).toHaveAccessibleName('Healthy')
+        await expect(domainBadge(page, 'partial.example')).toHaveAccessibleName('Warning')
+        await expect(domainBadge(page, 'down.example')).toHaveAccessibleName('Unhealthy')
         // A DNS error makes the domain unhealthy, even if its endpoints are healthy
-        await expect(domainBadge(page, 'dns-error.example')).toHaveText('Unhealthy')
-        await expect(domainBadge(page, 'no-endpoints.example')).toHaveText('Unhealthy')
+        await expect(domainBadge(page, 'dns-error.example')).toHaveAccessibleName('Unhealthy')
+        await expect(domainBadge(page, 'no-endpoints.example')).toHaveAccessibleName('Unhealthy')
 
         await expect(page.getByText('Last updated:')).toBeVisible()
+    })
+
+    test('the health of a domain is an icon before its name, named on hover', async ({ page }) => {
+        const badge = domainBadge(page, 'partial.example')
+        await expect(badge).toHaveText('')
+        await expect(badge.locator('svg')).toHaveCount(1)
+        await expect(badge).toHaveAttribute('role', 'img')
+        await expect(badge).toHaveAttribute('title', 'Warning')
+
+        // On the same line as the name, right before it
+        const title = domainCard(page, 'partial.example').locator('[data-slot="card-title"]')
+        const badgeBox = (await badge.boundingBox())!
+        const titleBox = (await title.boundingBox())!
+        expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(titleBox.x)
+        expect(titleBox.x - (badgeBox.x + badgeBox.width)).toBeLessThan(16)
+        expect(Math.abs(badgeBox.y + badgeBox.height / 2 - (titleBox.y + titleBox.height / 2))).toBeLessThan(4)
     })
 
     test('shows the details of each domain', async ({ page }) => {
@@ -236,13 +252,19 @@ test.describe('domain list', () => {
         await expect(card).toContainText('1/2 endpoints healthy')
         await expect(card).toContainText('Endpoints (2)')
 
-        // The state and the failures are shown as icons with a text for screen readers
+        // The health of an endpoint is an icon, named on hover, and the failures are a chip with a text for screen readers
         const healthyRow = endpointRow(card, '198.51.100.1')
-        await expect(healthyRow).toContainText('Healthy')
+        await expect(healthyRow.getByRole('img', { name: 'Healthy', exact: true })).toHaveAttribute('title', 'Healthy')
         await expect(healthyRow).not.toContainText('consecutive failed')
         const unhealthyRow = endpointRow(card, '198.51.100.2')
-        await expect(unhealthyRow).toContainText('Unhealthy')
+        await expect(unhealthyRow.getByRole('img', { name: 'Unhealthy', exact: true })).toHaveAttribute(
+            'title',
+            'Unhealthy'
+        )
         await expect(unhealthyRow).toContainText('3 consecutive failed checks')
+        for (const row of [healthyRow, unhealthyRow]) {
+            await expect(row.locator('[data-slot="badge"]')).toHaveText('')
+        }
 
         // Endpoints that are still healthy can have recent failures
         await expect(endpointRow(domainCard(page, 'healthy.example'), '192.0.2.2')).toContainText(
@@ -260,6 +282,38 @@ test.describe('domain list', () => {
         await expect(emptyCard).toContainText('0/0 endpoints healthy')
         await expect(emptyCard).not.toContainText('Endpoints (')
     })
+
+    for (const colorScheme of ['light', 'dark'] as const) {
+        test(`the endpoint badges have the colors of the domain badges, also on hover (${colorScheme} mode)`, async ({
+            page,
+        }) => {
+            await page.emulateMedia({ colorScheme })
+            // The badges have a transition on the text color, so read the colors once it's over
+            const colors = async (badge: Locator) => {
+                await page.evaluate(() =>
+                    Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})))
+                )
+                return badge.evaluate((el) => {
+                    const style = getComputedStyle(el)
+                    return { background: style.backgroundColor, text: style.color }
+                })
+            }
+
+            const card = domainCard(page, 'partial.example')
+            for (const [ip, domain] of [
+                ['198.51.100.1', 'healthy.example'],
+                ['198.51.100.2', 'down.example'],
+            ]) {
+                const badge = endpointRow(card, ip).locator('[data-slot="badge"]')
+                await page.mouse.move(0, 0)
+                const atRest = await colors(badge)
+                expect(atRest).toEqual(await colors(domainBadge(page, domain)))
+
+                await badge.hover()
+                expect(await colors(badge)).toEqual(atRest)
+            }
+        })
+    }
 
     test('counts the domains by health', async ({ page }) => {
         await expectSummary(page, 2, 1, 3)
@@ -442,15 +496,18 @@ test.describe('endpoints', () => {
     test('every state has an icon and a text, so none relies on color alone', async ({ page }) => {
         const card = domainCard(page, 'tiered.example')
         const rows = [
-            { address: '192.0.2.10', texts: ['Healthy', 'Priority 0', 'Published in DNS'] },
-            { address: '2001:db8::10', texts: ['Unhealthy', 'Priority 0', '4 consecutive failed checks'] },
+            { address: '192.0.2.10', state: 'Healthy', texts: ['Priority 0', 'Published in DNS'] },
+            { address: '2001:db8::10', state: 'Unhealthy', texts: ['Priority 0', '4 consecutive failed checks'] },
             {
                 address: 'tunnel.example.com',
-                texts: ['Healthy', 'Priority 1', 'Healthy, on standby'],
+                state: 'Healthy',
+                texts: ['Priority 1', 'Healthy, on standby'],
             },
         ]
-        for (const { address, texts } of rows) {
+        for (const { address, state, texts } of rows) {
             const row = endpointRow(card, address)
+            // The state is the name of an icon badge
+            await expect(row.getByRole('img', { name: state, exact: true })).toHaveCount(1)
             // Every svg is decoration: the same information is in text, visible or for screen readers
             const icons = row.locator('svg')
             expect(await icons.count()).toBeGreaterThan(0)
@@ -556,7 +613,7 @@ test.describe('refreshing', () => {
         status.body = recoveredDomains
         await page.clock.fastForward('01:00')
         await expect.poll(() => status.requests).toBe(2)
-        await expect(domainBadge(page, 'down.example')).toHaveText('Healthy')
+        await expect(domainBadge(page, 'down.example')).toHaveAccessibleName('Healthy')
 
         await page.getByRole('button', { name: 'Auto-refresh ON' }).click()
         const turnOn = page.getByRole('button', { name: 'Auto-refresh OFF' })
@@ -575,13 +632,13 @@ test.describe('refreshing', () => {
     test('Refresh now reloads the status', async ({ page }) => {
         const status = await mockStatus(page, domains)
         await page.goto('/')
-        await expect(domainBadge(page, 'down.example')).toHaveText('Unhealthy')
+        await expect(domainBadge(page, 'down.example')).toHaveAccessibleName('Unhealthy')
 
         status.body = recoveredDomains
         await page.getByRole('button', { name: 'More refresh options' }).click()
         await page.getByRole('menuitem', { name: 'Refresh now' }).click()
 
-        await expect(domainBadge(page, 'down.example')).toHaveText('Healthy')
+        await expect(domainBadge(page, 'down.example')).toHaveAccessibleName('Healthy')
         expect(status.requests).toBe(2)
     })
 })
@@ -597,7 +654,7 @@ test.describe('Check now', () => {
             await route.fulfill({ json: recoveredDomains })
         })
         await page.goto('/')
-        await expect(domainBadge(page, 'down.example')).toHaveText('Unhealthy')
+        await expect(domainBadge(page, 'down.example')).toHaveAccessibleName('Unhealthy')
 
         const checkNow = page.getByRole('button', { name: 'Check now' })
         await checkNow.click()
@@ -607,7 +664,7 @@ test.describe('Check now', () => {
 
         response.release()
         await expect(checkNow).toBeEnabled()
-        await expect(domainBadge(page, 'down.example')).toHaveText('Healthy')
+        await expect(domainBadge(page, 'down.example')).toHaveAccessibleName('Healthy')
 
         // The server requires this header, which blocks cross-site requests
         expect(checkRequests).toHaveLength(1)
@@ -710,14 +767,14 @@ test.describe('status icon', () => {
     test('changes when the status changes', async ({ page }) => {
         const status = await mockStatus(page, pickDomains(domains, 'healthy.example', 'down.example'))
         await page.goto('/')
-        await expect(domainBadge(page, 'down.example')).toHaveText('Unhealthy')
+        await expect(domainBadge(page, 'down.example')).toHaveAccessibleName('Unhealthy')
         await expectStatusIcon(page, 'unhealthy')
 
         status.body = pickDomains(recoveredDomains, 'healthy.example', 'down.example')
         await page.getByRole('button', { name: 'More refresh options' }).click()
         await page.getByRole('menuitem', { name: 'Refresh now' }).click()
 
-        await expect(domainBadge(page, 'down.example')).toHaveText('Healthy')
+        await expect(domainBadge(page, 'down.example')).toHaveAccessibleName('Healthy')
         await expectStatusIcon(page, 'healthy')
     })
 
@@ -804,13 +861,9 @@ test.describe('endpoint history', () => {
         await expect(button).toHaveAttribute('aria-expanded', 'false')
     })
 
-    test('the close button closes it and focus returns to the button', async ({ page }) => {
-        const button = historyButton(page, 'history.example')
-        await button.click()
-        await historyDialog(page, 'history.example').getByRole('button', { name: 'Close' }).click()
-
-        await expect(page.getByRole('dialog')).toHaveCount(0)
-        await expect(button).toBeFocused()
+    test('has no close button', async ({ page }) => {
+        await historyButton(page, 'history.example').click()
+        await expect(historyDialog(page, 'history.example').getByRole('button')).toHaveCount(0)
     })
 
     test('a click outside closes it', async ({ page }) => {
@@ -865,12 +918,7 @@ test.describe('endpoint history', () => {
         const dialog = historyDialog(page, 'history.example')
         await expect(dialog).toBeFocused()
 
-        // The next stop is the close button, which is inside the dialog
-        await page.keyboard.press('Tab')
-        await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused()
-        await expect(dialog).toBeVisible()
-
-        // The next one is outside
+        // There is nothing to focus inside the dialog, so the next stop is outside
         await page.keyboard.press('Tab')
         await expect(page.getByRole('dialog')).toHaveCount(0)
         await expect(historyButton(page, 'history.example')).toHaveAttribute('aria-expanded', 'false')
@@ -967,10 +1015,24 @@ test.describe('endpoint history', () => {
         await expect(historyDialog(page, 'old.example')).toContainText('Healthy since Dec 31, 2025, 11:30:00 PM')
     })
 
-    test('the button is on the line that counts the healthy endpoints', async ({ page }) => {
+    test('the button is an icon at the end of the line with the name', async ({ page }) => {
         const card = domainCard(page, 'history.example')
-        const line = card.getByText('5/6 endpoints healthy').locator('xpath=..')
-        await expect(line.getByRole('button', { name: 'History of history.example' })).toBeVisible()
+        const button = card.getByRole('button', { name: 'History of history.example' })
+        await expect(button).toBeVisible()
+        await expect(button).toHaveText('')
+        await expect(button).toHaveAttribute('title', 'Endpoint history')
+        await expect(button.locator('svg')).toHaveCount(1)
+
+        const buttonBox = (await button.boundingBox())!
+        const titleBox = (await card.locator('[data-slot="card-title"]').boundingBox())!
+        const headerBox = (await card.locator('[data-slot="card-header"]').boundingBox())!
+        expect(buttonBox.x).toBeGreaterThan(titleBox.x + titleBox.width)
+        // The header has a padding of 24 pixels
+        expect(headerBox.x + headerBox.width - (buttonBox.x + buttonBox.width)).toBeLessThanOrEqual(24)
+        expect(Math.abs(buttonBox.y + buttonBox.height / 2 - (titleBox.y + titleBox.height / 2))).toBeLessThan(4)
+
+        // The line that counts the healthy endpoints has only the count
+        await expect(card.getByText('5/6 endpoints healthy', { exact: true })).toBeVisible()
 
         // The time of the last update is only in the history dialog
         await expect(card.locator('time')).toHaveCount(0)
@@ -1016,7 +1078,7 @@ test.describe('endpoint history', () => {
         }
     })
 
-    test('stays next to its button when the page is scrolled or resized', async ({ page }) => {
+    test('scrolls with the page next to its button, and stays next to it when resized', async ({ page }) => {
         await page.setViewportSize({ width: 800, height: 400 })
         const button = historyButton(page, 'history.example')
         await button.click()
@@ -1031,10 +1093,29 @@ test.describe('endpoint history', () => {
         }
         await expect.poll(gap).toBeLessThan(10)
 
-        const scrollBefore = await page.evaluate(() => window.scrollY)
-        await page.evaluate(() => window.scrollBy(0, 60))
-        expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(scrollBefore)
-        await expect.poll(gap).toBeLessThan(10)
+        // The dialog moves together with the button while the page scrolls, without catching up later
+        // It also stays on the same side of the button, even if the other side has more room now
+        const buttonHandle = await button.elementHandle()
+        const offsets = await dialog.evaluate(async (el, buttonEl) => {
+            const offset = () => {
+                const d = el.getBoundingClientRect()
+                const b = buttonEl!.getBoundingClientRect()
+                return { x: d.left - b.left, y: d.top - b.top }
+            }
+            const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve))
+
+            const before = offset()
+            const scrollBefore = window.scrollY
+            window.scrollBy(0, 150)
+            const scrolled = window.scrollY - scrollBefore
+            const during = offset()
+            await nextFrame()
+            await nextFrame()
+            return { before, during, after: offset(), scrolled }
+        }, buttonHandle)
+        expect(offsets.scrolled).toBeGreaterThan(100)
+        expect(offsets.during).toEqual(offsets.before)
+        expect(offsets.after).toEqual(offsets.before)
 
         await page.setViewportSize({ width: 360, height: 400 })
         await expect.poll(gap).toBeLessThan(10)
@@ -1046,26 +1127,14 @@ test.describe('endpoint history', () => {
             .toBeLessThanOrEqual(360)
     })
 
-    test('the button and the close button are at least 24 by 24 pixels', async ({ page }) => {
-        await historyButton(page, 'history.example').click()
-        for (const button of [
-            historyButton(page, 'history.example'),
-            historyDialog(page, 'history.example').getByRole('button', { name: 'Close' }),
-        ]) {
-            const box = await button.boundingBox()
-            expect(box!.width).toBeGreaterThanOrEqual(24)
-            expect(box!.height).toBeGreaterThanOrEqual(24)
-        }
+    test('the button is at least 24 by 24 pixels', async ({ page }) => {
+        const box = await historyButton(page, 'history.example').boundingBox()
+        expect(box!.width).toBeGreaterThanOrEqual(24)
+        expect(box!.height).toBeGreaterThanOrEqual(24)
     })
 
-    test('the buttons show a pointer cursor', async ({ page }) => {
-        await historyButton(page, 'history.example').click()
-        for (const button of [
-            historyButton(page, 'history.example'),
-            historyDialog(page, 'history.example').getByRole('button', { name: 'Close' }),
-        ]) {
-            await expect(button).toHaveCSS('cursor', 'pointer')
-        }
+    test('the button shows a pointer cursor', async ({ page }) => {
+        await expect(historyButton(page, 'history.example')).toHaveCSS('cursor', 'pointer')
     })
 
     test('shows the dialog in front of the next cards', async ({ page }) => {

@@ -67,32 +67,16 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 	published := selectLowestPriority(priorities, healthy)
 	inDNS := dc.getPublishedIPs()
 
-	// Endpoints in the unhealthy list could also be in the healthy one,
-	// if they failed a recent health check but still less than the max attempts
+	// Endpoints in the unhealthy list could also be in the healthy one, if they failed a recent health check but still less than the max attempts
 	newEndpoint := func(ip string, isHealthy bool, failureCount int) DomainStatusEndpoint {
-		e := DomainStatusEndpoint{
-			Name:         dc.getName(ip),
-			Healthy:      isHealthy,
-			IP:           ip,
-			Priority:     priorities[ip],
-			Active:       isHealthy && slices.Contains(published, ip),
-			Pending:      pendingChange(lastError != "", isHealthy && slices.Contains(published, ip), slices.Contains(inDNS, ip)),
-			Type:         targets[ip].Type,
-			Proxied:      targets[ip].Proxied,
-			FailureCount: failureCount,
-		}
-		times := dc.getTimes(ip)
-		if times != nil {
-			e.Since = &times.since
-			e.SinceStart = times.sinceStart
-			if !times.lastFailure.IsZero() {
-				e.LastFailure = &times.lastFailure
-				e.LastError = times.lastError
-			}
-			if !times.firstFailure.IsZero() {
-				e.FirstFailure = &times.firstFailure
-			}
-		}
+		e := dc.getDomainStatusEndpoint(ip, isHealthy, failureCount)
+		active := isHealthy && slices.Contains(published, ip)
+		e.Name = dc.getName(ip)
+		e.Priority = priorities[ip]
+		e.Active = active
+		e.Pending = pendingChange(lastError != "", active, slices.Contains(inDNS, ip))
+		e.Type = targets[ip].Type
+		e.Proxied = targets[ip].Proxied
 		return e
 	}
 
@@ -131,4 +115,28 @@ func pendingChange(updateFailed bool, shouldBePublished bool, inDNS bool) string
 	default:
 		return ""
 	}
+}
+
+// getDomainStatusEndpoint returns the DomainStatusEndpoint object
+func (dc *domainChecker) getDomainStatusEndpoint(ip string, isHealthy bool, failureCount int) DomainStatusEndpoint {
+	e := DomainStatusEndpoint{
+		Healthy:      isHealthy,
+		IP:           ip,
+		FailureCount: failureCount,
+	}
+
+	times := dc.getTimes(ip)
+	if times != nil {
+		e.Since = &times.since
+		e.SinceStart = times.sinceStart
+		if !times.lastFailure.IsZero() {
+			e.LastFailure = &times.lastFailure
+			e.LastError = times.lastError
+		}
+		if !times.firstFailure.IsZero() {
+			e.FirstFailure = &times.firstFailure
+		}
+	}
+
+	return e
 }

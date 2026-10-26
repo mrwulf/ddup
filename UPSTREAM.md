@@ -3,12 +3,13 @@
 This file is specific to this fork: it tracks what has been, and still has to be, submitted to
 [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup). It must not be part of any upstream PR.
 
-Last reviewed: 2026-10-20 (dates are UTC). This fork's `main` is upstream `main` (`d5644c2`, which has #35, #36, #40, #41, #42, #43 and #44) merged in, then the refreshed heads of the open upstream pull requests #37 to #39, and the fork-only features below on top; see "State of the branch".
-go-kit (the maintainer's library, [italypaleale/go-kit](https://github.com/italypaleale/go-kit)) has a v1.5.1 release (the maintainer announced it on #40); this fork and upstream `main` both still use v1.5.0 in `go.mod`.
+Last reviewed: 2026-10-26 (dates are UTC). This fork's `main` is upstream `main` (`72525f4`, v0.7.1, which has #35, #36, #37, #40, #41, #42, #43, #44 and #45) merged in, then the refreshed heads of the open upstream pull requests #38 and #39, and the fork-only features below on top; see "State of the branch".
+go-kit (the maintainer's library, [italypaleale/go-kit](https://github.com/italypaleale/go-kit)) is at v1.6.0 in upstream `main`'s `go.mod`. It added the webhook formats `telegram`, `googlechat` and `teams`, which `pkg/config` does not accept yet, so `TestWebhookFormatsMatchGoKit` fails on upstream `main` too (checked 2026-10-26). Left alone on purpose: it is the maintainer's to fix, and the fork should not invent the configuration for them.
 
 ## Syncing with upstream
 
 Upstream squashes PRs, so the histories of our PR branches never match upstream's. Since 2026-10-20 this fork's `main` contains `upstream/main` as a real ancestor (a normal `git merge upstream/main`), so `git log main..upstream/main` is empty after a sync and `git diff upstream/main main` shows only what the fork adds.
+The maintainer also pushes commits onto our PR branches (for #37: the 💄 commit, "Various UI improvements", "More UI improvements" and "Docs"), and the squash that lands upstream is the final head of the branch. Merge the head of the PR branch into `main` first: then the squash is identical to what `main` has, and `git merge upstream/main` only brings the other upstream changes (take `main`'s side of the files that `git diff --quiet origin/<branch> upstream/main -- <file>` says are equal, and run `go mod tidy` for `go.sum`).
 A squashed PR conflicts (add/add) with the same PR's head that is already in the fork. Solve those files with a 3-way merge that uses the old head as the base, so only the maintainer's edits are applied: `git merge-file -p <fork-file> <file-at-old-head> <file-at-upstream-main>`. The old head is the last commit of the PR branch that `main` contains (`git merge-base --is-ancestor <sha> main`).
 After each sync run `git diff upstream/main main --stat` and make sure every difference is a fork-only feature or an open PR (see below). Dead code is easy to leave behind: the sync of 2026-10-20 removed `pkg/notify/redact.go`, which upstream dropped in #40.
 
@@ -51,8 +52,8 @@ Always branch PRs from `upstream/main` and apply only the listed changes; never 
 | go-kit [#10](https://github.com/italypaleale/go-kit/pull/10), [#11](https://github.com/italypaleale/go-kit/pull/11), [#12](https://github.com/italypaleale/go-kit/pull/12) | Resend emailer; webhook timeout, retry, private destination and redirect options; ntfy format | **Merged** 2026-10-13 and 2026-10-14, released in go-kit v1.5.0 | | Used by [#40](https://github.com/ItalyPaleAle/ddup/pull/40) |
 | [#35](https://github.com/ItalyPaleAle/ddup/pull/35) | Version footer (issue #28): build info written into `index.html` by the server, reload on upgrade | **Merged** 2026-10-15 (`1472e67`) after the maintainer's own changes | `feat/version-footer` | `pkg/server/buildinfo.go` and `static.go` are upstream's |
 | [#36](https://github.com/ItalyPaleAle/ddup/pull/36) | `DEVELOPMENT.md` and Makefile targets (issue #32) | **Merged** 2026-10-15 (`b4ec5fe`) | `docs/development` | Same |
-| [#37](https://github.com/ItalyPaleAle/ddup/pull/37) | Endpoint history popover: since when healthy or failing, and the failed checks of an endpoint in the warning state (issue #31) | **Open**, changes requested; the follow-up commits answer the review (seconds, `RWMutex`, the failures in the warning state), and the provider line is removed from the domain card (configuration, not status). The branch was force-pushed, so it is merged here through a bridge commit that records the old head | `feat/endpoint-history` | The "since" tooltip, now the popover |
-| [#38](https://github.com/ItalyPaleAle/ddup/pull/38) | `cname` endpoints and `providerOptions.cloudflare.proxied` (issue #24) | **Open**, review required; verified against the real Cloudflare API | `feat/cname-proxied` | `cname` and `proxied` on the endpoint, typed targets |
+| [#37](https://github.com/ItalyPaleAle/ddup/pull/37) | Endpoint history popover: since when healthy or failing, and the failed checks of an endpoint in the warning state (issue #31) | **Merged** 2026-10-26 (`fda23df`) with the maintainer's own commits on the branch (icon-only health badges, a new domain card header, e2e tests) | `feat/endpoint-history` | The popover is upstream's. The endpoint rows of the fork use the maintainer's `HealthBadge` for the state; `status.go` keeps the closure that adds the fork's fields (`name`, `priority`, `active`, `pending`) to `getDomainStatusEndpoint` |
+| [#38](https://github.com/ItalyPaleAle/ddup/pull/38) | `cname` endpoints and `providerOptions.cloudflare.proxied` (issue #24) | **Open**, review required; the maintainer asked for the merge conflicts to be fixed (the squash of #37), done 2026-10-26 (`f29ddcd`, `getDomainStatusEndpoint` takes the typed target); verified against the real Cloudflare API | `feat/cname-proxied` | `cname` and `proxied` on the endpoint, typed targets |
 | [#39](https://github.com/ItalyPaleAle/ddup/pull/39) | Public IP lookup over HTTPS, `ipLookupFamily`, `ipLookupURLs`, no built-in services (issue #25); verified against the real Cloudflare API | **Open**, changes requested; simplified after review (no `pattern`, an endpoint with `ipLookupURLs` and no family looks up IPv4, the lookup options are a struct) | `feat/ip-lookup-https` | Per-endpoint `ipLookup: {urls, family, pattern}` |
 | [#40](https://github.com/ItalyPaleAle/ddup/pull/40) | Notifications for ntfy, webhooks and email, on go-kit v1.5.0 (issue #26) | **Merged** 2026-10-20 (`d5644c2`) after the maintainer's changes (`email` is `emails`, no redaction, `token` in the delivery settings) | `feat/notifications` | `notifications.emails`, and `webhooks` with `format: ntfy`; `pkg/notify/redact.go` removed |
 | [#43](https://github.com/ItalyPaleAle/ddup/pull/43) | Keep tracking the health of the endpoints when a DNS update fails (the state was not stored after an error), and retry the update at the next check | **Merged** 2026-10-19 (`3b95046`), approved | `fix/update-failure-state` | Merged here with the flag named as in the PR: the fork's `needsResync` is now `updatePending` |
@@ -74,7 +75,7 @@ Always branch PRs from `upstream/main` and apply only the listed changes; never 
 | [#28](https://github.com/ItalyPaleAle/ddup/issues/28) | Version footer | Open; "Sure!" | [#35](https://github.com/ItalyPaleAle/ddup/pull/35) |
 | [#29](https://github.com/ItalyPaleAle/ddup/issues/29) | Tracking issue: what the fork needs and how it will be contributed | Open | Priorities, CNAME/proxied and dynamic IP are requirements for this deployment; if upstream declines them, the fork continues alone |
 | [#30](https://github.com/ItalyPaleAle/ddup/issues/30) | Leader election | Closed, not planned 2026-10-13: too much to maintain, ddup is not in the critical path, a standby does not replicate state | Fork-only, don't resubmit |
-| [#31](https://github.com/ItalyPaleAle/ddup/issues/31) | Since when an endpoint has been healthy or failing | Open; liked; asked for a clickable popover and design options | [#37](https://github.com/ItalyPaleAle/ddup/pull/37) |
+| [#31](https://github.com/ItalyPaleAle/ddup/issues/31) | Since when an endpoint has been healthy or failing | Closed, completed 2026-10-26 | [#37](https://github.com/ItalyPaleAle/ddup/pull/37), merged |
 | [#32](https://github.com/ItalyPaleAle/ddup/issues/32) | `mise.toml` for the development tools | Open (kept to remember); the maintainer wants a `DEVELOPMENT.md` and Makefile targets instead of mise, and removed `make gen-config` | [#36](https://github.com/ItalyPaleAle/ddup/pull/36). `feat/mise` is not needed |
 | [#33](https://github.com/ItalyPaleAle/ddup/issues/33) | Webhook `vars` | Open; made obsolete by the typed notifications (no templates upstream) | The maintainer can close it; fork-only until [#40](https://github.com/ItalyPaleAle/ddup/pull/40) |
 
@@ -139,8 +140,8 @@ The local `main` in the main checkout is 48 commits behind `origin/main`; update
 ## Releases
 
 The image is `ghcr.io/mrwulf/ddup`, built by `.github/workflows/build-and-publish.yaml` when a `v*` tag is pushed (and for `main` as `edge`).
-The tags are `v0.6.0-fork.N`. The latest is `v0.6.0-fork.24` (2026-10-14), and it is what is deployed.
-`main` is ahead of it by the refresh of 2026-10-16: the final heads of #35, #36 and #37 (the failed checks in the history popover), #39 and #40 (both reworked after review) and `1ade733` of upstream. The notifications configuration changes with it: `notifications.ntfy` becomes a `webhooks` entry with `format: ntfy`, so the deployed configuration and the image tag must change together.
+The tags are `v0.6.0-fork.N` (the image tag has no `v`). The latest is `v0.6.0-fork.30` (2026-10-26), cut from `main` after the sync with upstream `72525f4` (v0.7.1), the merged #37 with the maintainer's changes, and the refreshed heads of #38 and #39. The deployed configuration (`mrwulf/home-cluster`, `cluster/apps/networking/ddup`) already uses the `webhooks` and `emails` notifications, so only the image tag changes.
+The upstream tags (`v0.7.0`, `v0.7.1`) are not pushed to the fork: `git fetch upstream --no-tags` avoids fetching them.
 
 | Tag | Added |
 | :-- | :---- |
@@ -150,6 +151,8 @@ The tags are `v0.6.0-fork.N`. The latest is `v0.6.0-fork.24` (2026-10-14), and i
 | `fork.22` | Refreshed screenshots (docs only) |
 | `fork.23` | The integration of the open upstream PRs (#14, #17); the image build was cancelled for running too long |
 | `fork.24` | Container image built for the Linux platforms only |
+| `fork.25` to `fork.29` | Refreshes of the open PRs and upstream, not itemized |
+| `fork.30` | Upstream v0.7.1 with #37 merged (and the maintainer's changes to it), the conflict-free head of #38 |
 
 ## Before opening a PR
 

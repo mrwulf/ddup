@@ -3,6 +3,8 @@ package healthcheck
 import (
 	"slices"
 	"time"
+
+	"github.com/italypaleale/ddup/pkg/dns"
 )
 
 type DomainStatus struct {
@@ -69,14 +71,12 @@ func (hc *HealthChecker) getStatusObject(dc *domainChecker) DomainStatus {
 
 	// Endpoints in the unhealthy list could also be in the healthy one, if they failed a recent health check but still less than the max attempts
 	newEndpoint := func(ip string, isHealthy bool, failureCount int) DomainStatusEndpoint {
-		e := dc.getDomainStatusEndpoint(ip, isHealthy, failureCount)
+		e := dc.getDomainStatusEndpoint(ip, isHealthy, failureCount, targets[ip])
 		active := isHealthy && slices.Contains(published, ip)
 		e.Name = dc.getName(ip)
 		e.Priority = priorities[ip]
 		e.Active = active
 		e.Pending = pendingChange(lastError != "", active, slices.Contains(inDNS, ip))
-		e.Type = targets[ip].Type
-		e.Proxied = targets[ip].Proxied
 		return e
 	}
 
@@ -118,10 +118,12 @@ func pendingChange(updateFailed bool, shouldBePublished bool, inDNS bool) string
 }
 
 // getDomainStatusEndpoint returns the DomainStatusEndpoint object
-func (dc *domainChecker) getDomainStatusEndpoint(ip string, isHealthy bool, failureCount int) DomainStatusEndpoint {
+func (dc *domainChecker) getDomainStatusEndpoint(ip string, isHealthy bool, failureCount int, target dns.Target) DomainStatusEndpoint {
 	e := DomainStatusEndpoint{
 		Healthy:      isHealthy,
 		IP:           ip,
+		Type:         target.Type,
+		Proxied:      target.Proxied,
 		FailureCount: failureCount,
 	}
 

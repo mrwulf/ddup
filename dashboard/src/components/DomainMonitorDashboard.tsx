@@ -245,10 +245,7 @@ const EndpointRow = ({ endpoint, tiered }: { endpoint: DomainStatusEndpoint; tie
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border p-2">
       <div className="flex min-w-0 grow basis-48 items-center gap-2">
-        <HealthBadge
-          health={endpoint.healthy ? 'healthy' : 'unhealthy'}
-          className="size-6 shrink-0 [&>svg]:size-3.5"
-        />
+        <HealthBadge health={endpoint.healthy ? 'healthy' : 'unhealthy'} className="size-6 shrink-0 [&>svg]:size-3.5" />
         <div className="min-w-0">
           <div className={cn('truncate text-sm', showTarget ? 'font-medium' : 'font-mono')} title={primary}>
             {primary}

@@ -290,7 +290,7 @@ func (p *zoneProvider) Name() string         { return p.name }
 func (p *zoneProvider) ProviderType() string { return p.inner.ProviderType() }
 func (p *zoneProvider) HasCNAME() bool       { return p.inner.HasCNAME() }
 func (p *zoneProvider) ValidateProviderOptions(d *config.ConfigDomain) error {
-	return p.inner.ValidateProviderOptions(d)
+	return p.inner.ValidateProviderOptions(d) //nolint:wrapcheck
 }
 
 func (p *zoneProvider) UpdateRecords(_ context.Context, domain string, _ int, targets []dns.Target) (dns.UpdateResult, error) {

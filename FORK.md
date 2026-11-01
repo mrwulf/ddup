@@ -1,7 +1,7 @@
 # What this fork adds
 
 This fork of [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup) carries features that are not upstream, or not yet.
-This branch is upstream `main` (`72525f4`, v0.7.1, which has the notifications, the docs site, the version footer and the endpoint history) merged in, with the open upstream pull requests [#38](https://github.com/ItalyPaleAle/ddup/pull/38) and [#39](https://github.com/ItalyPaleAle/ddup/pull/39) on top, and the fork-only features below. What those pull requests add (`cname` and `proxied`, the IP lookup over HTTPS) is not listed here; the notifications and the endpoint history are upstream's.
+This branch is upstream `main` (`448825e`, after v0.7.1, which has the notifications, the docs site, the version footer and the endpoint history) merged in, with the open upstream pull requests [#38](https://github.com/ItalyPaleAle/ddup/pull/38) and [#39](https://github.com/ItalyPaleAle/ddup/pull/39) on top, and the fork-only features below. What those pull requests add (`cname` and `proxied`, the IP lookup over HTTPS) is not listed here; the notifications and the endpoint history are upstream's.
 Everything shown below is sample data: `example.com` names, documentation IP addresses (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`), and a made-up tunnel ID.
 [`UPSTREAM.md`](UPSTREAM.md) tracks each feature below against its upstream PR or decision.
 [`config.sample.yaml`](config.sample.yaml) documents every option.
@@ -10,7 +10,7 @@ Everything shown below is sample data: `example.com` names, documentation IP add
 
 ![The dashboard in the dark theme, with the red cross icon next to the title and the summary bar under the search bar: failover tiers, CNAME and proxied targets, dynamic DNS, a warning, and an error](screenshots/dashboard-dark.webp)
 
-Each endpoint row shows what ddup publishes and why. Upstream shows the endpoints of a domain by address; the rows here are fork-only for now (upstream issue [#27](https://github.com/ItalyPaleAle/ddup/issues/27), after the features above). The status API carries what the rows need: `name`, `priority` and `active` (published in DNS), next to the upstream fields `type`, `proxied` and the times.
+Each endpoint row shows what ddup publishes and why. Upstream shows the endpoints of a domain by address; the rows here are fork-only for now (upstream issue [#27](https://github.com/ItalyPaleAle/ddup/issues/27), after the features above). The status API carries what the rows need: `name`, `priority` and `active` (published in DNS), next to the upstream fields `target` (the address or the CNAME hostname), `type`, `proxied` and the times.
 
 - **Name and address.** The name of the endpoint is the main label, with its address below. An endpoint with no name shows its address. The rows are ordered by priority.
 - **Priority and standby.** In a domain with more than one priority, the row shows the endpoint's priority, and whether it is published in DNS or healthy on standby (see `fast-lb` and `ingress-lb`). A healthy endpoint that is published in DNS shows the published chip also in a domain with one priority, so the rows look the same in every domain. The selection of the lowest priority is upstream's; the display and the published set in the status API are not.

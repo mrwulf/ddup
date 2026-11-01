@@ -4,7 +4,7 @@ const domains = {
     'healthy.example': {
         lastUpdated: '2026-01-02T03:04:05Z',
         provider: 'cloudflare',
-        endpoints: [{ healthy: true, ip: '192.0.2.1' }],
+        endpoints: [{ healthy: true, target: '192.0.2.1' }],
     },
 }
 

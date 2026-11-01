@@ -39,7 +39,28 @@ func loadIntegrationConfig(t *testing.T, yaml string) (*config.Config, error) {
 	if err != nil {
 		return cfg, fmt.Errorf("validating the config: %w", err)
 	}
-	return cfg, ValidateConfig(cfg)
+	return cfg, validateWithProviders(cfg)
+}
+
+// validateWithProviders checks that the providers selected by the configuration can publish what the endpoints ask for
+// It uses bare providers, because some of the real ones can't be created without credentials
+func validateWithProviders(cfg *config.Config) error {
+	providers := make(map[string]Provider, len(cfg.Providers))
+	for name, pc := range cfg.Providers {
+		switch {
+		case pc.Cloudflare != nil:
+			providers[name] = &CloudflareProvider{}
+		case pc.OVH != nil:
+			providers[name] = &OVHProvider{}
+		case pc.Azure != nil:
+			providers[name] = &AzureProvider{}
+		case pc.AWSRoute53 != nil:
+			providers[name] = &AWSRoute53Provider{}
+		case pc.GoogleCloudDNS != nil:
+			providers[name] = &GoogleCloudDNSProvider{}
+		}
+	}
+	return ValidateConfig(cfg, providers)
 }
 
 const integrationNotifications = `
@@ -95,7 +116,7 @@ func TestIntegrationMixedDomainValidates(t *testing.T) {
 		require.Len(t, eps, 3)
 		assert.False(t, eps[0].Dynamic())
 		assert.True(t, eps[1].Dynamic())
-		assert.True(t, eps[2].Proxied())
+		assert.True(t, cloudflareProxied(eps[2]))
 		assert.Equal(t, "0a1b2c3d.cfargotunnel.com", eps[2].Target())
 
 		// Two dynamic endpoints are not the "same target", even though neither has a fixed one
@@ -256,7 +277,7 @@ func TestIntegrationSampleConfigHasEveryFeature(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, cfg.Validate(slog.Default()))
-	require.NoError(t, ValidateConfig(cfg))
+	require.NoError(t, validateWithProviders(cfg))
 
 	var (
 		hasIP, hasIPv6, hasCNAME, hasProxied, hasPriority, hasDynamic, hasOwnLookupURLs bool
@@ -270,7 +291,7 @@ func TestIntegrationSampleConfigHasEveryFeature(t *testing.T) {
 			hasIP = hasIP || e.IP != ""
 			hasIPv6 = hasIPv6 || strings.Contains(e.IP, ":")
 			hasCNAME = hasCNAME || e.CNAME != ""
-			hasProxied = hasProxied || e.Proxied()
+			hasProxied = hasProxied || cloudflareProxied(e)
 			hasPriority = hasPriority || e.Priority > 0
 			hasDynamic = hasDynamic || e.Dynamic()
 			hasOwnLookupURLs = hasOwnLookupURLs || len(e.IPLookupURLs) > 0

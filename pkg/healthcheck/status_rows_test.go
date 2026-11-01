@@ -48,16 +48,16 @@ func TestStatus_NamePriorityAndPublishedTier(t *testing.T) {
 
 	// The first tier is published, the tunnel is healthy on standby
 	assert.ElementsMatch(t, []DomainStatusEndpoint{
-		{Name: "vps", Healthy: true, Active: true, IP: "192.0.2.10", Type: "A"},
-		{Healthy: true, Active: true, IP: "192.0.2.11", Type: "A"},
-		{Name: "tunnel", Healthy: true, IP: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Priority: 1},
+		{Name: "vps", Healthy: true, Active: true, Target: "192.0.2.10", Type: "A"},
+		{Healthy: true, Active: true, Target: "192.0.2.11", Type: "A"},
+		{Name: "tunnel", Healthy: true, Target: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Priority: 1},
 	}, setHealth(true, true, true))
 
 	// Both A records are down: the tunnel is published
 	assert.ElementsMatch(t, []DomainStatusEndpoint{
-		{Name: "vps", Healthy: false, IP: "192.0.2.10", Type: "A", FailureCount: 1},
-		{Healthy: false, IP: "192.0.2.11", Type: "A", FailureCount: 1},
-		{Name: "tunnel", Healthy: true, Active: true, IP: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Priority: 1},
+		{Name: "vps", Healthy: false, Target: "192.0.2.10", Type: "A", FailureCount: 1},
+		{Healthy: false, Target: "192.0.2.11", Type: "A", FailureCount: 1},
+		{Name: "tunnel", Healthy: true, Active: true, Target: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Priority: 1},
 	}, setHealth(false, false, true))
 }
 
@@ -82,8 +82,8 @@ func TestStatus_DynamicEndpointName(t *testing.T) {
 		return withoutTimes(hc.GetDomainStatus("home.example.com").Endpoints)
 	}
 
-	assert.Equal(t, []DomainStatusEndpoint{{Name: "home", Healthy: true, Active: true, IP: "203.0.113.1", Type: "A", Priority: 2}}, run("203.0.113.1"))
-	assert.Equal(t, []DomainStatusEndpoint{{Name: "home", Healthy: true, Active: true, IP: "203.0.113.2", Type: "A", Priority: 2}}, run("203.0.113.2"))
+	assert.Equal(t, []DomainStatusEndpoint{{Name: "home", Healthy: true, Active: true, Target: "203.0.113.1", Type: "A", Priority: 2}}, run("203.0.113.1"))
+	assert.Equal(t, []DomainStatusEndpoint{{Name: "home", Healthy: true, Active: true, Target: "203.0.113.2", Type: "A", Priority: 2}}, run("203.0.113.2"))
 	run("203.0.113.3")
 	run("203.0.113.4")
 	// Only the current address and the one before it are kept

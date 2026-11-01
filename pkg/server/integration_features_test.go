@@ -29,9 +29,9 @@ func (p *mixedStatusProvider) status() healthcheck.DomainStatus {
 	return healthcheck.DomainStatus{
 		Provider: "cf",
 		Endpoints: []healthcheck.DomainStatusEndpoint{
-			{Healthy: false, IP: "192.0.2.10", Type: "A", FailureCount: 2, Since: &failure, LastFailure: &failure},
-			{Healthy: false, IP: "2001:db8::1", Type: "AAAA", FailureCount: 2, Since: &failure, LastFailure: &failure},
-			{Healthy: true, IP: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Since: &since, SinceStart: true},
+			{Healthy: false, Target: "192.0.2.10", Type: "A", FailureCount: 2, Since: &failure, LastFailure: &failure},
+			{Healthy: false, Target: "2001:db8::1", Type: "AAAA", FailureCount: 2, Since: &failure, LastFailure: &failure},
+			{Healthy: true, Target: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Since: &since, SinceStart: true},
 		},
 	}
 }
@@ -117,7 +117,7 @@ func TestIntegrationStatusAPIFieldsOfAMixedDomain(t *testing.T) {
 
 	assert.Equal(t, map[string]any{
 		"healthy":      false,
-		"ip":           "192.0.2.10",
+		"target":       "192.0.2.10",
 		"type":         "A",
 		"failureCount": float64(2),
 		"since":        "2026-01-02T03:05:05Z",
@@ -126,7 +126,7 @@ func TestIntegrationStatusAPIFieldsOfAMixedDomain(t *testing.T) {
 	assert.Equal(t, "AAAA", res.Endpoints[1]["type"])
 	assert.Equal(t, map[string]any{
 		"healthy":    true,
-		"ip":         "0a1b2c3d.cfargotunnel.com",
+		"target":     "0a1b2c3d.cfargotunnel.com",
 		"type":       "CNAME",
 		"proxied":    true,
 		"since":      "2026-01-02T03:04:05Z",

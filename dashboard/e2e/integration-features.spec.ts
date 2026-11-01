@@ -5,7 +5,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 interface DomainStatusEndpoint {
     healthy: boolean
-    ip: string
+    target: string
     name?: string
     type?: string
     proxied?: boolean
@@ -41,16 +41,16 @@ const mixedDomains: DomainsResponse = {
         endpoints: [
             {
                 healthy: false,
-                ip: '192.0.2.10',
+                target: '192.0.2.10',
                 type: 'A',
                 failureCount: 2,
                 since: '2026-10-13T09:00:00Z',
                 lastFailure: '2026-10-13T09:29:00Z',
             },
-            { healthy: true, ip: '203.0.113.5', type: 'A', since: '2026-10-13T07:45:00Z', sinceStart: true },
+            { healthy: true, target: '203.0.113.5', type: 'A', since: '2026-10-13T07:45:00Z', sinceStart: true },
             {
                 healthy: true,
-                ip: '0a1b2c3d.cfargotunnel.com',
+                target: '0a1b2c3d.cfargotunnel.com',
                 type: 'CNAME',
                 proxied: true,
                 since: '2026-10-09T08:15:00Z',
@@ -110,8 +110,8 @@ test.describe('mixed domain with the build info', () => {
                 lastUpdated: '2026-10-13T09:30:00Z',
                 provider: 'cloudflare',
                 endpoints: [
-                    { healthy: true, ip: '192.0.2.10', name: 'vps-east', type: 'A', since: '2026-10-13T09:00:00Z' },
-                    { healthy: true, ip: '192.0.2.11', type: 'A', since: '2026-10-13T09:00:00Z' },
+                    { healthy: true, target: '192.0.2.10', name: 'vps-east', type: 'A', since: '2026-10-13T09:00:00Z' },
+                    { healthy: true, target: '192.0.2.11', type: 'A', since: '2026-10-13T09:00:00Z' },
                 ],
             },
         })

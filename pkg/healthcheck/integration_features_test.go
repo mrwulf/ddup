@@ -227,7 +227,7 @@ func TestIntegrationMixedDomainStatus(t *testing.T) {
 	require.NoError(t, json.Unmarshal(enc, &decoded))
 	require.Len(t, decoded.Endpoints, 3)
 	for _, e := range decoded.Endpoints {
-		assert.Contains(t, e, "ip")
+		assert.Contains(t, e, "target")
 		assert.Contains(t, e, "healthy")
 		assert.Contains(t, e, "type")
 		assert.Contains(t, e, "since")
@@ -266,7 +266,7 @@ func TestIntegrationDynamicAddressChangeStatus(t *testing.T) {
 func statusByIP(endpoints []DomainStatusEndpoint) map[string]DomainStatusEndpoint {
 	res := make(map[string]DomainStatusEndpoint, len(endpoints))
 	for _, e := range endpoints {
-		res[e.IP] = e
+		res[e.Target] = e
 	}
 	return res
 }

@@ -63,7 +63,7 @@ func TestHealthChecker_StandbyKeepsItsOwnTimes(t *testing.T) {
 	require.NotNil(t, status)
 	require.Len(t, status.Endpoints, 2)
 	for _, e := range status.Endpoints {
-		require.NotNil(t, e.Since, "endpoint %s", e.IP)
+		require.NotNil(t, e.Since, "endpoint %s", e.Target)
 		assert.True(t, e.SinceStart, "a replica only knows since when it checked")
 	}
 }

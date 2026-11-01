@@ -36,7 +36,7 @@ interface DomainStatusEndpoint {
   name?: string
   healthy: boolean
   // IP address, or CNAME hostname
-  ip: string
+  target: string
   // Lower values are preferred
   priority?: number
   // True if published in DNS
@@ -90,7 +90,7 @@ const sortEndpoints = (endpoints: DomainStatusEndpoint[]): DomainStatusEndpoint[
       (a.priority ?? 0) - (b.priority ?? 0) ||
       Number(!!b.active) - Number(!!a.active) ||
       Number(b.healthy) - Number(a.healthy) ||
-      (a.name ?? a.ip).localeCompare(b.name ?? b.ip)
+      (a.name ?? a.target).localeCompare(b.name ?? b.target)
   )
 
 // A small icon (with an optional label) that explains itself on hover and to screen readers
@@ -239,7 +239,7 @@ const Legend = () => (
 const EndpointRow = ({ endpoint, tiered }: { endpoint: DomainStatusEndpoint; tiered: boolean }) => {
   const failures = endpoint.failureCount ?? 0
   // The name is the main label when there is one, and the address is secondary
-  const primary = endpoint.name || endpoint.ip
+  const primary = endpoint.name || endpoint.target
   const showTarget = !!endpoint.name
 
   return (
@@ -251,8 +251,8 @@ const EndpointRow = ({ endpoint, tiered }: { endpoint: DomainStatusEndpoint; tie
             {primary}
           </div>
           {showTarget && (
-            <div className="truncate font-mono text-xs text-muted-foreground" title={endpoint.ip}>
-              {shortenMiddle(endpoint.ip)}
+            <div className="truncate font-mono text-xs text-muted-foreground" title={endpoint.target}>
+              {shortenMiddle(endpoint.target)}
             </div>
           )}
         </div>
@@ -451,7 +451,7 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
     const domainMatches = domain.name.toLowerCase().includes(searchLower)
     const endpointMatches = domain.status.endpoints.some(
       (endpoint) =>
-        endpoint.ip.toLowerCase().includes(searchLower) || (endpoint.name ?? '').toLowerCase().includes(searchLower)
+        endpoint.target.toLowerCase().includes(searchLower) || (endpoint.name ?? '').toLowerCase().includes(searchLower)
     )
     return domainMatches || endpointMatches
   })
@@ -638,7 +638,7 @@ const DomainMonitorDashboard = ({ endpoint }: { endpoint: string }) => {
                         <div className="space-y-2">
                           {sortEndpoints(domain.status.endpoints).map((endpoint) => (
                             <EndpointRow
-                              key={`${endpoint.name ?? ''}|${endpoint.ip}`}
+                              key={`${endpoint.name ?? ''}|${endpoint.target}`}
                               endpoint={endpoint}
                               tiered={hasTiers(domain.status)}
                             />

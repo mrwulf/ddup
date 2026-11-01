@@ -194,17 +194,13 @@ func (o ConfigEndpointProviderOptions) Keys() []string {
 	return keys
 }
 
-// Proxied returns true if the records for this endpoint should be proxied by the DNS provider
-func (e *ConfigEndpoint) Proxied() bool {
-	return e.ProviderOptions.Cloudflare != nil && e.ProviderOptions.Cloudflare.Proxied
-}
-
 // Target returns what the endpoint publishes in DNS, which is its IP address or its CNAME hostname
 // It is unique among the endpoints of a domain
 func (e *ConfigEndpoint) Target() string {
 	if e.CNAME != "" {
 		return e.CNAME
 	}
+
 	return e.IP
 }
 
@@ -582,15 +578,18 @@ func (e *ConfigEndpoint) validateTarget(recordName string, families map[int]bool
 		if err != nil {
 			return fmt.Errorf("IP %q is not a valid IPv4 or IPv6 address", e.IP)
 		}
+
 		e.IP = ip.String()
 	case e.CNAME != "":
 		cname, err := normalizeHostname(e.CNAME)
 		if err != nil {
 			return fmt.Errorf("cname %w", err)
 		}
+
 		if cname == normalizeRecordName(recordName) {
 			return fmt.Errorf("cname %q is the domain's own record name", cname)
 		}
+
 		e.CNAME = cname
 	}
 
@@ -601,9 +600,8 @@ func (e *ConfigEndpoint) validateTarget(recordName string, families map[int]bool
 // It must be called after each endpoint has been validated
 func validateDomainEndpoints(d *ConfigDomain) error {
 	type priorityGroup struct {
-		count   int
-		cname   bool
-		proxied bool
+		count int
+		cname bool
 	}
 	groups := make(map[int]*priorityGroup, len(d.Endpoints))
 	targets := make(map[string]int, len(d.Endpoints))
@@ -620,16 +618,11 @@ func validateDomainEndpoints(d *ConfigDomain) error {
 
 		g := groups[e.Priority]
 		if g == nil {
-			g = &priorityGroup{proxied: e.Proxied()}
+			g = &priorityGroup{}
 			groups[e.Priority] = g
 		}
 		g.count++
 		g.cname = g.cname || e.CNAME != ""
-
-		// A set of records is either all proxied or all DNS-only
-		if g.proxied != e.Proxied() {
-			return fmt.Errorf("domain %s endpoint %d is invalid: endpoints with priority %d must all use the same value for providerOptions.cloudflare.proxied", d.RecordName, ei, e.Priority)
-		}
 	}
 
 	for _, priority := range slices.Sorted(maps.Keys(groups)) {
@@ -739,15 +732,18 @@ func normalizeHostname(name string) (string, error) {
 	if name == "" || len(name) > 253 {
 		return "", fmt.Errorf("%q is not a valid hostname", name)
 	}
+
 	_, err := netip.ParseAddr(name)
 	if err == nil {
 		return "", fmt.Errorf("%q is an IP address; use ip instead", name)
 	}
+
 	for label := range strings.SplitSeq(name, ".") {
 		if !hostnameLabelRegexp.MatchString(label) {
 			return "", fmt.Errorf("%q is not a valid hostname", name)
 		}
 	}
+
 	return name, nil
 }
 

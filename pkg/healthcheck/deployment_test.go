@@ -91,7 +91,13 @@ func loadDeploymentConfig(t *testing.T) *config.Config {
 	})
 	require.NoError(t, err)
 	require.NoError(t, cfg.Validate(slog.Default()))
-	require.NoError(t, dns.ValidateConfig(cfg))
+	providers := make(map[string]dns.Provider, len(cfg.Providers))
+	for name, pc := range cfg.Providers {
+		p, err := dns.NewProvider(name, &pc, nil)
+		require.NoError(t, err)
+		providers[name] = p
+	}
+	require.NoError(t, dns.ValidateConfig(cfg, providers))
 	return cfg
 }
 
@@ -130,19 +136,19 @@ func TestDeploymentLikeConfig_Structure(t *testing.T) {
 	require.Len(t, ingress.Endpoints, 3)
 	assert.Equal(t, "192.0.2.10", ingress.Endpoints[0].IP)
 	assert.Equal(t, 0, ingress.Endpoints[0].Priority)
-	assert.False(t, ingress.Endpoints[0].Proxied())
+	assert.False(t, endpointProxied(t, ingress.Endpoints[0]))
 	assert.Equal(t, "192.0.2.11", ingress.Endpoints[1].IP)
 	assert.Equal(t, 0, ingress.Endpoints[1].Priority)
 	assert.Equal(t, "0a1b2c3d.cfargotunnel.com", ingress.Endpoints[2].CNAME)
 	assert.Equal(t, 1, ingress.Endpoints[2].Priority)
-	assert.True(t, ingress.Endpoints[2].Proxied())
+	assert.True(t, endpointProxied(t, ingress.Endpoints[2]))
 
 	// The same endpoints with the tiers swapped, through YAML merge keys
 	fast := byName["fast-lb.example.com"]
 	require.Len(t, fast.Endpoints, 3)
 	assert.Equal(t, "0a1b2c3d.cfargotunnel.com", fast.Endpoints[0].CNAME)
 	assert.Equal(t, 0, fast.Endpoints[0].Priority)
-	assert.True(t, fast.Endpoints[0].Proxied())
+	assert.True(t, endpointProxied(t, fast.Endpoints[0]))
 	assert.Equal(t, "192.0.2.10", fast.Endpoints[1].IP)
 	assert.Equal(t, 1, fast.Endpoints[1].Priority)
 	assert.Equal(t, "192.0.2.11", fast.Endpoints[2].IP)
@@ -276,11 +282,16 @@ type zoneProvider struct {
 	zone    *fakeZone
 	replica string
 	name    string
-	caps    dns.Capabilities
+	// The provider created from the configuration, which answers for what the provider can publish
+	inner dns.Provider
 }
 
-func (p *zoneProvider) Name() string                   { return p.name }
-func (p *zoneProvider) Capabilities() dns.Capabilities { return p.caps }
+func (p *zoneProvider) Name() string         { return p.name }
+func (p *zoneProvider) ProviderType() string { return p.inner.ProviderType() }
+func (p *zoneProvider) HasCNAME() bool       { return p.inner.HasCNAME() }
+func (p *zoneProvider) ValidateProviderOptions(d *config.ConfigDomain) error {
+	return p.inner.ValidateProviderOptions(d)
+}
 
 func (p *zoneProvider) UpdateRecords(_ context.Context, domain string, _ int, targets []dns.Target) (dns.UpdateResult, error) {
 	z := p.zone
@@ -630,7 +641,7 @@ func (d *deployment) newReplica(t *testing.T, name string) *replica {
 	for pname, pc := range d.cfg.Providers {
 		p, err := dns.NewProvider(pname, &pc, nil)
 		require.NoError(t, err)
-		providers[pname] = &zoneProvider{zone: d.zone, replica: name, name: pname, caps: p.Capabilities()}
+		providers[pname] = &zoneProvider{zone: d.zone, replica: name, name: pname, inner: p}
 	}
 
 	hc, err := newHealthChecker(providers, nil, trust(d.lookupA.Server))
@@ -933,4 +944,13 @@ func TestDeploymentLike_NtfyNeedsAllowPrivateDestinations(t *testing.T) {
 			}
 		})
 	}
+}
+
+// endpointProxied returns true if the target published for the endpoint is proxied
+func endpointProxied(t *testing.T, e *config.ConfigEndpoint) bool {
+	t.Helper()
+
+	target, err := dns.NewTarget(e)
+	require.NoError(t, err)
+	return target.Proxied
 }

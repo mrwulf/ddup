@@ -1,7 +1,8 @@
 # What this fork adds
 
 This fork of [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup) carries features that are not upstream, or not yet.
-This branch is upstream `main` (`448825e`, after v0.7.1, which has the notifications, the docs site, the version footer and the endpoint history) merged in, with the open upstream pull requests [#38](https://github.com/ItalyPaleAle/ddup/pull/38) and [#39](https://github.com/ItalyPaleAle/ddup/pull/39) on top, and the fork-only features below. What those pull requests add (`cname` and `proxied`, the IP lookup over HTTPS) is not listed here; the notifications and the endpoint history are upstream's.
+This branch is upstream `main` (`17f7379`, which has the notifications, the docs site, the version footer, the endpoint history, and `cname` and `proxied`) merged in, with the fork-only features below on top. The IP lookup over HTTPS (`ipLookupFamily`, `ipLookupURLs`), which upstream declined ([#39](https://github.com/ItalyPaleAle/ddup/pull/39)), is also kept here; the options are documented in [`config.sample.yaml`](config.sample.yaml). The notifications, the endpoint history and `cname` are upstream's.
+A workflow ([`sync-upstream.yaml`](.github/workflows/sync-upstream.yaml)) opens a pull request each time upstream `main` changes.
 Everything shown below is sample data: `example.com` names, documentation IP addresses (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`), and a made-up tunnel ID.
 [`UPSTREAM.md`](UPSTREAM.md) tracks each feature below against its upstream PR or decision.
 [`config.sample.yaml`](config.sample.yaml) documents every option.

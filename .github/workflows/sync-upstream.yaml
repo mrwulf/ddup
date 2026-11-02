@@ -1,0 +1,86 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    env:
+      # A token that is not the default one makes the checks run on the pull request, because pushes made with the default token do not trigger workflows
+      # Create a fine-grained token with contents and pull requests write access, and save it as the secret SYNC_TOKEN
+      GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
+
+      - name: Fetch upstream
+        id: upstream
+        run: |
+          git remote add upstream https://github.com/ItalyPaleAle/ddup.git
+          git fetch upstream main --no-tags
+          sha="$(git rev-parse --short=7 upstream/main)"
+          echo "sha=${sha}" >>"${GITHUB_OUTPUT}"
+          if git merge-base --is-ancestor upstream/main HEAD ; then
+            echo "Already up to date with upstream ${sha}"
+            echo "needed=false" >>"${GITHUB_OUTPUT}"
+          else
+            echo "needed=true" >>"${GITHUB_OUTPUT}"
+          fi
+
+      - name: Check for an open sync pull request
+        id: existing
+        if: steps.upstream.outputs.needed == 'true'
+        run: |
+          count="$(gh pr list --state open --head "sync/upstream-${{ steps.upstream.outputs.sha }}" --json number --jq 'length')"
+          echo "count=${count}" >>"${GITHUB_OUTPUT}"
+
+      - name: Merge upstream
+        if: steps.upstream.outputs.needed == 'true' && steps.existing.outputs.count == '0'
+        run: |
+          branch="sync/upstream-${{ steps.upstream.outputs.sha }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${branch}"
+
+          if ! git merge --no-edit upstream/main ; then
+            git merge --abort
+            echo "::error::Merging upstream/main (${{ steps.upstream.outputs.sha }}) conflicts: sync it by hand, see UPSTREAM.md"
+            exit 1
+          fi
+
+          git push origin "${branch}"
+
+          git log --oneline --no-merges HEAD^1..upstream/main >body.txt
+          {
+            echo "Merges upstream \`main\` (${{ steps.upstream.outputs.sha }}) into the fork."
+            echo
+            echo "Changes from upstream:"
+            echo
+            echo '```'
+            cat body.txt
+            echo '```'
+            echo
+            echo "Before merging: look at the checks, and at \`UPSTREAM.md\` for the files that the fork changes."
+            echo "To deploy, push a \`v*\` tag after merging."
+          } >pr.md
+
+          gh pr create \
+            --base main \
+            --head "${branch}" \
+            --title "Merge upstream main (${{ steps.upstream.outputs.sha }})" \
+            --body-file pr.md

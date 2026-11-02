@@ -169,10 +169,10 @@ func (hc *HealthChecker) checkAndUpdateDNS(ctx context.Context) {
 				continue
 			}
 
-			target, targetErr := resultTarget(result)
-			if targetErr != nil {
+			target, err := resultTarget(result)
+			if err != nil {
 				// The configuration has been validated, so this indicates a development-time error
-				domainLog.ErrorContext(ctx, "Invalid endpoint", "endpoint", result.Endpoint.Name, "error", targetErr)
+				domainLog.ErrorContext(ctx, "Invalid endpoint", "endpoint", result.Endpoint.Name, "error", err)
 				continue
 			}
 			targets[ip] = target
@@ -299,6 +299,7 @@ func endpointTarget(ep *config.ConfigEndpoint) (dns.Target, error) {
 	if err != nil {
 		return dns.Target{}, fmt.Errorf("invalid target for endpoint %s: %w", ep.Name, err)
 	}
+
 	return target, nil
 }
 
@@ -325,6 +326,7 @@ func targetsFor(targets map[string]dns.Target, keys []string) []dns.Target {
 			res = append(res, t)
 		}
 	}
+
 	return res
 }
 
@@ -333,10 +335,12 @@ func targetsMatch(a, b []dns.Target) bool {
 	if len(a) != len(b) {
 		return false
 	}
+
 	for _, t := range a {
 		if !slices.Contains(b, t) {
 			return false
 		}
 	}
+
 	return true
 }

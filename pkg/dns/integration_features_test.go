@@ -116,7 +116,7 @@ func TestIntegrationMixedDomainValidates(t *testing.T) {
 		require.Len(t, eps, 3)
 		assert.False(t, eps[0].Dynamic())
 		assert.True(t, eps[1].Dynamic())
-		assert.True(t, cloudflareProxied(eps[2]))
+		assert.True(t, eps[2].ProviderOptions.Cloudflare.IsProxied())
 		assert.Equal(t, "0a1b2c3d.cfargotunnel.com", eps[2].Target())
 
 		// Two dynamic endpoints are not the "same target", even though neither has a fixed one
@@ -291,7 +291,7 @@ func TestIntegrationSampleConfigHasEveryFeature(t *testing.T) {
 			hasIP = hasIP || e.IP != ""
 			hasIPv6 = hasIPv6 || strings.Contains(e.IP, ":")
 			hasCNAME = hasCNAME || e.CNAME != ""
-			hasProxied = hasProxied || cloudflareProxied(e)
+			hasProxied = hasProxied || e.ProviderOptions.Cloudflare.IsProxied()
 			hasPriority = hasPriority || e.Priority > 0
 			hasDynamic = hasDynamic || e.Dynamic()
 			hasOwnLookupURLs = hasOwnLookupURLs || len(e.IPLookupURLs) > 0

@@ -25,8 +25,9 @@ type Target struct {
 // NewTarget returns the target that an endpoint publishes
 // The type of the record depends on which key the endpoint uses: an IP address is an A or AAAA record, depending on its family, and cname is a CNAME record
 func NewTarget(e *config.ConfigEndpoint) (Target, error) {
+	proxied := e.ProviderOptions.Cloudflare.IsProxied()
 	if e.CNAME != "" {
-		return CNAMETarget(e.CNAME, cloudflareProxied(e)), nil
+		return CNAMETarget(e.CNAME, proxied), nil
 	}
 	return NewIPTarget(e, e.IP)
 }
@@ -34,7 +35,7 @@ func NewTarget(e *config.ConfigEndpoint) (Target, error) {
 // NewIPTarget returns the target for an IP address that an endpoint publishes
 // It is used by the endpoints that look up their IP address, which have no fixed one
 func NewIPTarget(e *config.ConfigEndpoint, ip string) (Target, error) {
-	return IPTarget(ip, cloudflareProxied(e))
+	return IPTarget(ip, e.ProviderOptions.Cloudflare.IsProxied())
 }
 
 // IPTarget returns the target for an IP address, which is an A record for IPv4 addresses and an AAAA record for IPv6 addresses
@@ -133,11 +134,16 @@ func NewProvider(name string, cfg *config.ConfigProvider, metrics *appmetrics.Ap
 func plainIPsFromTargets(provider string, targets []Target) ([]string, error) {
 	ips := make([]string, len(targets))
 	for i, t := range targets {
-		if (t.Type != recordTypeA && t.Type != recordTypeAAAA) || t.Proxied {
-			return nil, fmt.Errorf("%w: provider %s can only publish A and AAAA records that are not proxied, got %s record %q", ErrUnsupportedTarget, provider, t.Type, t.Value)
+		if t.Type != recordTypeA && t.Type != recordTypeAAAA {
+			return nil, fmt.Errorf("%w: provider %s can only publish A and AAAA records, got %s record %q", ErrUnsupportedTarget, provider, t.Type, t.Value)
 		}
+		if t.Proxied {
+			return nil, fmt.Errorf("%w: provider %s can only publish records that are not proxied", ErrUnsupportedTarget, provider)
+		}
+
 		ips[i] = t.Value
 	}
+
 	return ips, nil
 }
 

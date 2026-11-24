@@ -53,7 +53,7 @@ func validateWithProviders(cfg *config.Config) error {
 		case pc.OVH != nil:
 			providers[name] = &OVHProvider{}
 		case pc.Azure != nil:
-			providers[name] = &AzureProvider{}
+			providers[name] = &AzureProvider{zoneName: "example.com"}
 		case pc.AWSRoute53 != nil:
 			providers[name] = &AWSRoute53Provider{}
 		case pc.GoogleCloudDNS != nil:
@@ -206,12 +206,25 @@ func TestIntegrationProviderCapabilities(t *testing.T) {
 		"google":  "    googleCloudDns:\n      projectId: \"p\"\n      managedZone: \"z\"\n",
 	}
 
-	for name, block := range providers {
+	// Azure DNS and AWS Route 53 publish CNAME records, since upstream #47
+	withoutCNAME := []string{"ovh", "google"}
+	for _, name := range withoutCNAME {
+		block := providers[name]
 		t.Run(name+" rejects cname", func(t *testing.T) {
 			_, err := loadIntegrationConfig(t, integrationConfig(block, "", ""))
 			require.ErrorContains(t, err, "cname is not supported by provider 'p'")
 		})
+	}
 
+	for _, name := range []string{"azure", "route53"} {
+		block := providers[name]
+		t.Run(name+" accepts cname", func(t *testing.T) {
+			_, err := loadIntegrationConfig(t, integrationConfig(block, "", ""))
+			require.NoError(t, err)
+		})
+	}
+
+	for name, block := range providers {
 		t.Run(name+" rejects providerOptions.cloudflare", func(t *testing.T) {
 			// Same domain without the cname, so the options are the only problem
 			yaml := `

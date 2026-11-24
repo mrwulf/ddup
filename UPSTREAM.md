@@ -3,8 +3,8 @@
 This file is specific to this fork: it tracks what has been, and still has to be, submitted to
 [ItalyPaleAle/ddup](https://github.com/ItalyPaleAle/ddup). It must not be part of any upstream PR.
 
-Last reviewed: 2026-11-02 (dates are UTC). This fork's `main` is upstream `main` (`17f7379`, which has #35, #36, #37, #38, #40, #41, #42, #43, #44 and #45) merged in, then the fork-only features below on top, and #39 (declined upstream, kept here).
-go-kit (the maintainer's library, [italypaleale/go-kit](https://github.com/italypaleale/go-kit)) is at v1.6.0 in upstream `main`'s `go.mod`. It added the webhook formats `telegram`, `googlechat` and `teams`, which `pkg/config` does not accept yet, so `TestWebhookFormatsMatchGoKit` fails on upstream `main` too (checked 2026-10-26). Left alone on purpose: it is the maintainer's to fix, and the fork should not invent the configuration for them.
+Last reviewed: 2026-11-23 (dates are UTC). This fork's `main` is upstream `main` (`758e0ff`, which has #35, #36, #37, #38, #40, #41, #42, #43, #44, #45 and #47) merged in, then the fork-only features below on top, and #39 (declined upstream, kept here).
+go-kit (the maintainer's library, [italypaleale/go-kit](https://github.com/italypaleale/go-kit)) is at v1.8.1 in upstream `main`'s `go.mod`, and `TestWebhookFormatsMatchGoKit` passes again (checked 2026-11-23).
 
 ## Syncing with upstream
 

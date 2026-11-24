@@ -1,0 +1,5 @@
+[tools]
+go = "1.27.4"
+node = "lts"
+pnpm = "12.6.0"
+golangci-lint = "2.14.0"

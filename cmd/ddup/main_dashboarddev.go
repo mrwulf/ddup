@@ -108,9 +108,9 @@ func (m mockStatusProvider) GetAllDomainsStatus() map[string]healthcheck.DomainS
 			Provider:    provider1,
 			Error:       "",
 			Endpoints: []healthcheck.DomainStatusEndpoint{
-				{Name: "vps-us", IP: "192.0.2.10", Type: "A", Healthy: true, Priority: 0, Active: true, Since: ago(6 * time.Hour)},
-				{Name: "vps-eu", IP: "198.51.100.11", Type: "A", Healthy: true, Priority: 0, Active: true, Since: ago(6 * time.Hour)},
-				{Name: "tunnel", IP: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Healthy: true, Priority: 1, Since: ago(6 * time.Hour)},
+				{Name: "vps-us", Target: "192.0.2.10", Type: "A", Healthy: true, Priority: 0, Active: true, Since: ago(6 * time.Hour)},
+				{Name: "vps-eu", Target: "198.51.100.11", Type: "A", Healthy: true, Priority: 0, Active: true, Since: ago(6 * time.Hour)},
+				{Name: "tunnel", Target: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Healthy: true, Priority: 1, Since: ago(6 * time.Hour)},
 			},
 		},
 		"fast-lb.example.com": {
@@ -118,9 +118,9 @@ func (m mockStatusProvider) GetAllDomainsStatus() map[string]healthcheck.DomainS
 			Provider:    provider1,
 			Error:       "",
 			Endpoints: []healthcheck.DomainStatusEndpoint{
-				{Name: "tunnel", IP: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Healthy: true, Priority: 0, Active: true, Since: ago(6 * time.Hour)},
-				{Name: "vps-us", IP: "192.0.2.10", Type: "A", Healthy: true, Priority: 1, Since: ago(6 * time.Hour)},
-				{Name: "vps-eu", IP: "198.51.100.11", Type: "A", Healthy: true, Priority: 1, Since: ago(6 * time.Hour)},
+				{Name: "tunnel", Target: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Healthy: true, Priority: 0, Active: true, Since: ago(6 * time.Hour)},
+				{Name: "vps-us", Target: "192.0.2.10", Type: "A", Healthy: true, Priority: 1, Since: ago(6 * time.Hour)},
+				{Name: "vps-eu", Target: "198.51.100.11", Type: "A", Healthy: true, Priority: 1, Since: ago(6 * time.Hour)},
 			},
 		},
 		"failover.example.com": {
@@ -128,9 +128,9 @@ func (m mockStatusProvider) GetAllDomainsStatus() map[string]healthcheck.DomainS
 			Provider:    provider1,
 			Error:       "",
 			Endpoints: []healthcheck.DomainStatusEndpoint{
-				{Name: "vps-us", IP: "192.0.2.10", Type: "A", Healthy: false, Priority: 0, FailureCount: 4, Since: ago(12 * time.Minute), LastFailure: ago(30 * time.Second)},
-				{Name: "vps-eu", IP: "198.51.100.11", Type: "A", Healthy: false, Priority: 0, FailureCount: 9, Since: ago(12 * time.Minute), LastFailure: ago(30 * time.Second)},
-				{Name: "tunnel", IP: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Healthy: true, Priority: 1, Active: true, Since: ago(6 * time.Hour)},
+				{Name: "vps-us", Target: "192.0.2.10", Type: "A", Healthy: false, Priority: 0, FailureCount: 4, Since: ago(12 * time.Minute), LastFailure: ago(30 * time.Second)},
+				{Name: "vps-eu", Target: "198.51.100.11", Type: "A", Healthy: false, Priority: 0, FailureCount: 9, Since: ago(12 * time.Minute), LastFailure: ago(30 * time.Second)},
+				{Name: "tunnel", Target: "0a1b2c3d.cfargotunnel.com", Type: "CNAME", Proxied: true, Healthy: true, Priority: 1, Active: true, Since: ago(6 * time.Hour)},
 			},
 		},
 		"home.example.com": {
@@ -138,7 +138,7 @@ func (m mockStatusProvider) GetAllDomainsStatus() map[string]healthcheck.DomainS
 			Provider:    provider2,
 			Error:       "",
 			Endpoints: []healthcheck.DomainStatusEndpoint{
-				{Name: "home", IP: "203.0.113.45", Type: "A", Healthy: true, Active: true, Since: ago(2 * 24 * time.Hour)},
+				{Name: "home", Target: "203.0.113.45", Type: "A", Healthy: true, Active: true, Since: ago(2 * 24 * time.Hour)},
 			},
 		},
 		"emptyendpoints.test": {

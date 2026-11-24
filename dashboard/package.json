@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "type-check": "tsc --noEmit && tsc -p scripts",
     "build:favicons": "node --experimental-strip-types scripts/build-favicons.ts",
+    "build:screenshots": "node --experimental-strip-types scripts/capture-screenshots.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier -w .",

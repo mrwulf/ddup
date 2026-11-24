@@ -90,7 +90,19 @@ This is a candidate for upstream as a separate change, for example by building t
 
 ## Regenerating the screenshots
 
-The images come from the dashboard's `dashboarddev` mode, which serves static data instead of running health checks (`cmd/ddup/main_dashboarddev.go`, which uses only example names and documentation addresses).
-To regenerate them, build with `-tags dashboarddev` and capture the page with a headless browser.
-`tab-states.webp` is a capture of a real, non-headless Chrome window pointed at that server, with neutral sample pages in the other tabs; headless Chrome has no tab strip.
+Four of the images come from a script: `dashboard-dark`, `dashboard-light`, `dashboard-mobile-dark` and `auto-refresh-menu`, all in `screenshots/`.
+[`dashboard/scripts/capture-screenshots.ts`](dashboard/scripts/capture-screenshots.ts) opens the dashboard in headless Chromium at 2x, replaces `/api/status` with its own sample data (only `example.com` names and documentation addresses, so it doesn't matter what ddup serves), and writes WebP files.
+The built-in data of the `dashboarddev` mode is not used: it has real-looking addresses such as `1.1.1.1`.
+
+1. Build the dashboard and a ddup that embeds it: `make dashboard`, then `go build -tags dashboarddev -o .bin/ddup-dev ./cmd/ddup`.
+   The `dashboarddev` tag makes ddup start without checking anything, but it still needs a valid config: `DDUP_CONFIG=config.sample.yaml .bin/ddup-dev` listens on `localhost:7401`.
+2. Install a browser once with `cd dashboard && pnpm exec playwright install chromium`, or set `CHROME_BIN` to a Chrome or Chromium binary.
+3. Run `cd dashboard && pnpm run build:screenshots [url]` while ddup is running (the URL defaults to `http://localhost:7401`).
+4. Look at every image before committing: the header shows the time of the capture, so each run changes all the files, even without UI changes. Regenerate only when the UI changed.
+
+Change the sample data in the script when a new feature needs to show up in the images.
 Never take screenshots from a real deployment: they would show real names and addresses.
+
+`tab-in-browser.webp` and `tab-states.webp` are not from the script. `tab-states.webp` is a capture of a real, non-headless Chrome window pointed at the server of step 1, with neutral sample pages in the other tabs; headless Chrome has no tab strip. Redo them only when the tab icons change.
+
+On a machine without the system libraries or fonts of Chromium and without root, the missing Debian packages can be extracted into a scratch directory (`apt-get download <package>` and `dpkg-deb -x`) and used with `LD_LIBRARY_PATH`; for the fonts, point `FONTCONFIG_FILE` at a config with a `<dir>` for the extracted fonts (for example `fonts-inter`).
